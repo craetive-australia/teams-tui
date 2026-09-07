@@ -47,7 +47,14 @@ fn write_entry(level: &str, msg: &str) {
         if let Some(ref path) = *path_guard {
             let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
             let line = format!("[{}] [{}] {}\n", timestamp, level, msg);
-            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
+            let mut options = OpenOptions::new();
+            options.create(true).append(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            if let Ok(mut file) = options.open(path) {
                 let _ = file.write_all(line.as_bytes());
             }
         }
