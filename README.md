@@ -73,3 +73,11 @@ debug_logging = false
 
 ## License
 MIT
+
+## Support
+
+If you find `teams-tui` helpful, consider supporting development:
+
+[![Support on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/craetiveaustralia)
+
+Or visit: [ko-fi.com/craetiveaustralia](https://ko-fi.com/craetiveaustralia)
