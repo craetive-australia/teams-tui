@@ -172,11 +172,12 @@ pub struct ChatMessage {
 impl ChatMessage {
     /// Convert HTML or text content into readable plain text for TUI
     pub fn clean_content(&self) -> String {
-        if self.body.content_type.eq_ignore_ascii_case("html") {
+        let text = if self.body.content_type.eq_ignore_ascii_case("html") {
             strip_html_tags(&self.body.content)
         } else {
             self.body.content.clone()
-        }
+        };
+        strip_ansi_and_control(&text)
     }
 
     pub fn sender_display_name(&self) -> String {
@@ -184,11 +185,36 @@ impl ChatMessage {
             .as_ref()
             .and_then(|f| f.user.as_ref())
             .and_then(|u| u.display_name.clone())
+            .map(|s| strip_ansi_and_control(&s))
             .unwrap_or_else(|| "Unknown".to_string())
     }
 }
 
 /// Helper to strip basic HTML tags and replace common entities
+fn strip_ansi_and_control(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    let mut in_escape = false;
+
+    for ch in text.chars() {
+        if in_escape {
+            if ch.is_ascii_alphabetic() || ch == '~' {
+                in_escape = false;
+            }
+            continue;
+        }
+
+        if ch == '\x1b' || ch == '\x9b' {
+            in_escape = true;
+            continue;
+        }
+
+        if ch == '\n' || ch == '\r' || ch == '\t' || !ch.is_control() {
+            result.push(ch);
+        }
+    }
+    result
+}
+
 fn strip_html_tags(html: &str) -> String {
     let mut result = String::with_capacity(html.len());
     let mut in_tag = false;
