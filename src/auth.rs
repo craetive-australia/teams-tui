@@ -281,20 +281,40 @@ impl AuthManager {
         None
     }
 
-    /// Save token to OS Keyring and fallback file
+    /// Save token to OS Keyring and fallback file securely
     fn save_tokens(&self, tokens: &TokenStore) {
         if let Ok(json_str) = serde_json::to_string(tokens) {
-            // Try OS Keyring
+            // Try OS Keyring first
             if let Ok(entry) = Entry::new(KEYRING_SERVICE, KEYRING_USER) {
-                let _ = entry.set_password(&json_str);
+                if entry.set_password(&json_str).is_ok() {
+                    return; // Avoid writing plain text fallback if keyring succeeded
+                }
             }
 
             // Fallback: local session file
             let fallback_path = Self::fallback_token_path();
             if let Some(parent) = fallback_path.parent() {
-                let _ = fs::create_dir_all(parent);
+                let _ = std::fs::create_dir_all(parent);
             }
-            let _ = fs::write(&fallback_path, json_str);
+            
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                let _ = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .truncate(true)
+                    .mode(0o600)
+                    .open(&fallback_path)
+                    .and_then(|mut f| {
+                        use std::io::Write;
+                        f.write_all(json_str.as_bytes())
+                    });
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = std::fs::write(&fallback_path, json_str);
+            }
         }
     }
 
