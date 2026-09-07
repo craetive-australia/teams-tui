@@ -1,0 +1,22 @@
+{
+    "version": "0.1.0",
+    "description": "Terminal User Interface for Microsoft Teams using Microsoft Graph API",
+    "homepage": "https://github.com/craetive-australia/teams-tui",
+    "license": "MIT",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/craetive-australia/teams-tui/releases/download/v0.1.0/teams-tui-windows-amd64.exe.zip",
+            "hash": "dummy"
+        }
+    },
+    "extract_dir": "",
+    "bin": "teams-tui.exe",
+    "checkver": "github",
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/craetive-australia/teams-tui/releases/download/v$version/teams-tui-windows-amd64.exe.zip"
+            }
+        }
+    }
+}

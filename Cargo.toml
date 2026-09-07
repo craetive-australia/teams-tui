@@ -1,0 +1,31 @@
+[package]
+name = "teams-tui"
+version = "0.1.0"
+edition = "2021"
+authors = ["Teams TUI Team"]
+description = "Terminal User Interface for Microsoft Teams using Microsoft Graph API"
+license = "MIT"
+repository = "https://github.com/andre/teams-tui"
+keywords = ["tui", "teams", "microsoft", "graph", "terminal"]
+categories = ["command-line-utilities"]
+
+[dependencies]
+# TUI & Terminal Handling
+ratatui = "0.28"
+crossterm = { version = "0.28", features = ["event-stream"] }
+
+# Async runtime & Networking
+tokio = { version = "1.40", features = ["full"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+futures = "0.3"
+
+# Serialization & Configuration
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+directories = "5.0"
+
+# CLI & Security
+clap = { version = "4.5", features = ["derive", "env"] }
+keyring = "3.0"
+chrono = { version = "0.4", features = ["serde"] }

@@ -1,0 +1,8 @@
+/target
+/teams-tui.exe
+*.log
+**/*.rs.bk
+*.jpg
+.cargo-targets/
+
+.cargo/
