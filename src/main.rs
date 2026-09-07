@@ -547,7 +547,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     
                                     match res {
                                         Ok(_) => {
-                                            logger::log_info("Successfully updated preferred presence.".to_string());
+                                            logger::log_info("Successfully updated preferred presence.");
                                             let _ = tx.send(BackgroundEvent::PresenceSetResult(Ok(()))).await;
                                             // Trigger a fetch to update locally
                                             if let Ok(presence) = g.get_presence().await {

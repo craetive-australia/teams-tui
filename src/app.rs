@@ -315,8 +315,8 @@ impl App {
                 if let Some(ref name) = member.display_name {
                     if !name.trim().is_empty() && name.to_lowercase() != me_name {
                         let email = member.email.as_deref().unwrap_or("");
-                        if name.to_lowercase().contains(&q) || email.to_lowercase().contains(&q) {
-                            if seen.insert(name.to_lowercase()) {
+                        if (name.to_lowercase().contains(&q) || email.to_lowercase().contains(&q))
+                            && seen.insert(name.to_lowercase()) {
                                 results.push(OrgUser {
                                     id: member.user_id.clone().or_else(|| member.id.clone()).unwrap_or_default(),
                                     display_name: Some(name.clone()),
@@ -326,7 +326,6 @@ impl App {
                                     department: None,
                                 });
                             }
-                        }
                     }
                 }
             }
@@ -338,13 +337,12 @@ impl App {
     /// Find an existing 1:1 chat for a given user if already in chat list
     pub fn find_existing_chat(&self, target_name: &str, target_id: &str) -> Option<ChatSummary> {
         for chat in &self.raw_chats {
-            if !target_id.is_empty() {
-                if chat.members.iter().any(|m| {
+            if !target_id.is_empty()
+                && chat.members.iter().any(|m| {
                     m.user_id.as_deref() == Some(target_id) || m.id.as_deref() == Some(target_id)
                 }) {
                     return Some(chat.clone());
                 }
-            }
             if chat.members.iter().any(|m| {
                 m.display_name
                     .as_deref()
