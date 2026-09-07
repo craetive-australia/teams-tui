@@ -11,7 +11,7 @@ categories = ["command-line-utilities"]
 
 [dependencies]
 # TUI & Terminal Handling
-ratatui = "0.28"
+ratatui = "0.30"
 crossterm = { version = "0.28", features = ["event-stream"] }
 
 # Async runtime & Networking
