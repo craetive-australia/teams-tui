@@ -224,7 +224,7 @@ impl GraphClient {
         let auth_val = format!("Bearer {}", token);
         headers.insert(
             AUTHORIZATION,
-            HeaderValue::from_str(&auth_val).expect("Invalid auth header value"),
+            HeaderValue::from_str(&auth_val).unwrap_or_else(|_| HeaderValue::from_static("Bearer INVALID")),
         );
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
@@ -245,9 +245,7 @@ impl GraphClient {
         let mut attempts = 0;
         let start_time = std::time::Instant::now();
         loop {
-            let req = req_builder
-                .try_clone()
-                .expect("Request builder must be cloneable for retries");
+            let req = match req_builder.try_clone() { Some(r) => r, None => return req_builder.send().await, };
             let resp = req.send().await?;
             let status = resp.status();
             let elapsed_ms = start_time.elapsed().as_millis();
@@ -599,3 +597,5 @@ impl GraphClient {
         Ok(chat)
     }
 }
+
+
