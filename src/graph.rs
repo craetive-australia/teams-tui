@@ -203,7 +203,7 @@ fn strip_ansi_and_control(text: &str) -> String {
             continue;
         }
 
-        if ch == '\x1b' || ch == '\x9b' {
+        if ch == '\x1b' || ch == '\u{9b}' {
             in_escape = true;
             continue;
         }
