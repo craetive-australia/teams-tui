@@ -4,9 +4,16 @@ on:
   push:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to publish (e.g. v0.1.5)'
+        required: false
+        default: ''
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   build-and-release:
@@ -59,6 +66,7 @@ jobs:
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v1
         with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
           files: |
             *.tar.gz
             *.zip
@@ -79,14 +87,16 @@ jobs:
         run: cargo publish --token ${{ secrets.CRATES_IO_TOKEN }} || echo "Already published or failed"
 
       - name: Publish Homebrew Tap
+        continue-on-error: true
         env:
           TAP_REPO: "craetive-australia/homebrew-teams-tui"
           GITHUB_TOKEN: ${{ secrets.PAT }}
         run: |
-          VERSION=${GITHUB_REF_NAME#v}
-          MAC_ARM_URL="https://github.com/craetive-australia/teams-tui/releases/download/${GITHUB_REF_NAME}/teams-tui-macos-arm64.tar.gz"
-          MAC_INTEL_URL="https://github.com/craetive-australia/teams-tui/releases/download/${GITHUB_REF_NAME}/teams-tui-macos-amd64.tar.gz"
-          LINUX_URL="https://github.com/craetive-australia/teams-tui/releases/download/${GITHUB_REF_NAME}/teams-tui-linux-amd64.tar.gz"
+          REF_NAME="${{ inputs.tag || github.ref_name }}"
+          VERSION="${REF_NAME#v}"
+          MAC_ARM_URL="https://github.com/craetive-australia/teams-tui/releases/download/${REF_NAME}/teams-tui-macos-arm64.tar.gz"
+          MAC_INTEL_URL="https://github.com/craetive-australia/teams-tui/releases/download/${REF_NAME}/teams-tui-macos-amd64.tar.gz"
+          LINUX_URL="https://github.com/craetive-australia/teams-tui/releases/download/${REF_NAME}/teams-tui-linux-amd64.tar.gz"
           
           # We wait briefly to ensure GitHub Releases has processed the uploads
           sleep 10
@@ -128,12 +138,16 @@ jobs:
           git push origin main
 
       - name: Update Scoop Manifest
+        continue-on-error: true
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.PAT || secrets.GITHUB_TOKEN }}
         run: |
-          VERSION=${GITHUB_REF_NAME#v}
-          WIN_URL="https://github.com/craetive-australia/teams-tui/releases/download/${GITHUB_REF_NAME}/teams-tui-windows-amd64.exe.zip"
+          REF_NAME="${{ inputs.tag || github.ref_name }}"
+          VERSION="${REF_NAME#v}"
+          WIN_URL="https://github.com/craetive-australia/teams-tui/releases/download/${REF_NAME}/teams-tui-windows-amd64.exe.zip"
           
+          # Wait briefly to ensure GitHub release asset is available
+          sleep 5
           WIN_SHA=$(curl -sL $WIN_URL | shasum -a 256 | awk '{print $1}')
           
           jq ".version = \"${VERSION}\" | .architecture[\"64bit\"].url = \"${WIN_URL}\" | .architecture[\"64bit\"].hash = \"${WIN_SHA}\"" teams-tui.json > tmp.json
@@ -141,14 +155,21 @@ jobs:
           
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          BRANCH_NAME="automation/scoop-manifest-${VERSION}"
+          git checkout -b "${BRANCH_NAME}"
           git add teams-tui.json
-          git commit -m "Update Scoop manifest to ${VERSION}" || true
-          git push origin HEAD:main
+          git commit -m "chore(scoop): update manifest to ${VERSION}" || true
+          git push origin "${BRANCH_NAME}" --force || true
+          gh pr create --title "chore(scoop): update Scoop manifest to ${VERSION}" \
+                       --body "Automated update of teams-tui.json for release ${VERSION}" \
+                       --base main \
+                       --head "${BRANCH_NAME}" || echo "PR creation skipped or already exists"
 
       - name: Submit to Winget
+        continue-on-error: true
         uses: vedantmgoyal2009/winget-releaser@v2
         with:
           identifier: craetive-australia.teams-tui
-          version: ${{ github.ref_name }}
+          version: ${{ inputs.tag || github.ref_name }}
           installers-regex: '\.zip$'
           token: ${{ secrets.PAT }}
