@@ -6,7 +6,7 @@
   "architecture": {
     "64bit": {
       "url": "https://github.com/craetive-australia/teams-tui/releases/download/v0.1.5/teams-tui-windows-amd64.exe.zip",
-      "hash": "597946cea075fc7ebab1db6d4474048e148459a6d82f140e78630e4581862265"
+      "hash": "031fa1055fea6da0ed09dd7f22f831414912a5711072e5e106018717e0441192"
     }
   },
   "extract_dir": "",
