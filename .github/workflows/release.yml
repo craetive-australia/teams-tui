@@ -169,7 +169,7 @@ jobs:
         continue-on-error: true
         uses: vedantmgoyal2009/winget-releaser@v2
         with:
-          identifier: craetive-australia.teams-tui
+          identifier: Craetive.teams-tui
           version: ${{ inputs.tag || github.ref_name }}
           installers-regex: '\.zip$'
           token: ${{ secrets.PAT }}
