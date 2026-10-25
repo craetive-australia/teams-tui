@@ -10,6 +10,8 @@ use tokio::time::sleep;
 
 const KEYRING_SERVICE: &str = "teams-tui";
 const KEYRING_USER: &str = "ms-graph-tokens";
+const KEYRING_CHUNKS_PREFIX: &str = "CHUNKS:";
+const KEYRING_CHUNK_SIZE: usize = 1000;
 
 pub const SCOPES: &[&str] = &[
     "User.Read",
@@ -62,7 +64,11 @@ pub struct AuthManager {
 }
 
 impl AuthManager {
-    pub fn new(client_id: String, tenant_id: String, allow_insecure_token_file: bool) -> Result<Self, String> {
+    pub fn new(
+        client_id: String,
+        tenant_id: String,
+        allow_insecure_token_file: bool,
+    ) -> Result<Self, String> {
         Self::validate_tenant_id(&tenant_id)?;
 
         Ok(Self {
@@ -91,8 +97,13 @@ impl AuthManager {
     }
 
     /// Primary entry point: Get valid access token (using cache, refresh, or interactive device login)
-    pub async fn get_access_token(&self, force_login: bool) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        if !force_login {
+    pub async fn get_access_token(
+        &self,
+        force_login: bool,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        if force_login {
+            let _ = Self::clear_stored_tokens();
+        } else {
             // Check memory cache first
             {
                 let lock = self.cached_tokens.read().await;
@@ -148,7 +159,9 @@ impl AuthManager {
     }
 
     /// Refresh token during an active session if needed
-    pub async fn refresh_current_token(&self) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn refresh_current_token(
+        &self,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         let refresh_tok = {
             let lock = self.cached_tokens.read().await;
             lock.as_ref()
@@ -182,12 +195,7 @@ impl AuthManager {
             ("scope", scopes_joined.as_str()),
         ];
 
-        let resp = self
-            .client
-            .post(&device_url)
-            .form(&params)
-            .send()
-            .await?;
+        let resp = self.client.post(&device_url).form(&params).send().await?;
 
         if !resp.status().is_success() {
             let err_text = resp.text().await?;
@@ -216,7 +224,9 @@ impl AuthManager {
 
         loop {
             if Instant::now() >= deadline {
-                return Err("Device code expired before sign-in completed. Please rerun teams-tui.".into());
+                return Err(
+                    "Device code expired before sign-in completed. Please rerun teams-tui.".into(),
+                );
             }
 
             sleep(poll_interval).await;
@@ -277,7 +287,10 @@ impl AuthManager {
     }
 
     /// Refresh access token using stored refresh token
-    async fn refresh_token(&self, refresh_token: &str) -> Result<TokenStore, Box<dyn std::error::Error + Send + Sync>> {
+    async fn refresh_token(
+        &self,
+        refresh_token: &str,
+    ) -> Result<TokenStore, Box<dyn std::error::Error + Send + Sync>> {
         let token_url = format!(
             "https://login.microsoftonline.com/{}/oauth2/v2.0/token",
             self.tenant_id
@@ -291,12 +304,7 @@ impl AuthManager {
             ("scope", scopes_joined.as_str()),
         ];
 
-        let resp = self
-            .client
-            .post(&token_url)
-            .form(&params)
-            .send()
-            .await?;
+        let resp = self.client.post(&token_url).form(&params).send().await?;
 
         if !resp.status().is_success() {
             let err_text = resp.text().await?;
@@ -313,7 +321,9 @@ impl AuthManager {
 
             Ok(TokenStore {
                 access_token: access_tok,
-                refresh_token: body.refresh_token.or_else(|| Some(refresh_token.to_string())),
+                refresh_token: body
+                    .refresh_token
+                    .or_else(|| Some(refresh_token.to_string())),
                 expires_at,
             })
         } else {
@@ -324,16 +334,13 @@ impl AuthManager {
     /// Load token from OS Keyring or explicitly permitted fallback file
     fn load_tokens(&self) -> Option<TokenStore> {
         // 1. Try OS Keyring
-        match Entry::new(KEYRING_SERVICE, KEYRING_USER) {
-            Ok(entry) => match entry.get_password() {
-                Ok(json_str) => match serde_json::from_str::<TokenStore>(&json_str) {
-                    Ok(tokens) => return Some(tokens),
-                    Err(e) => crate::logger::log_warn(format!("Failed to parse keyring tokens: {e}")),
-                },
-                Err(keyring::Error::NoEntry) => {}
-                Err(e) => crate::logger::log_warn(format!("Keyring lookup error: {e}")),
+        match Self::load_from_keyring() {
+            Ok(Some(json_str)) => match serde_json::from_str::<TokenStore>(&json_str) {
+                Ok(tokens) => return Some(tokens),
+                Err(e) => crate::logger::log_warn(format!("Failed to parse keyring tokens: {e}")),
             },
-            Err(e) => crate::logger::log_warn(format!("Could not access OS Keyring entry: {e}")),
+            Ok(None) => {}
+            Err(e) => crate::logger::log_warn(format!("Keyring lookup error: {e}")),
         }
 
         // 2. Fallback: local session file only if permitted
@@ -355,24 +362,152 @@ impl AuthManager {
         None
     }
 
+    /// Split a string into chunks of at most `max_utf16_len` UTF-16 code units,
+    /// preserving valid Unicode scalar boundaries.
+    fn split_into_chunks(s: &str, max_utf16_len: usize) -> Vec<String> {
+        if s.is_empty() {
+            return Vec::new();
+        }
+        let mut chunks = Vec::new();
+        let mut current = String::new();
+        let mut current_utf16_len = 0;
+
+        for ch in s.chars() {
+            let ch_utf16_len = ch.len_utf16();
+            if current_utf16_len + ch_utf16_len > max_utf16_len && !current.is_empty() {
+                chunks.push(std::mem::take(&mut current));
+                current_utf16_len = 0;
+            }
+            current.push(ch);
+            current_utf16_len += ch_utf16_len;
+        }
+        if !current.is_empty() {
+            chunks.push(current);
+        }
+        chunks
+    }
+
+    /// Save token payload to OS Keyring, chunking across multiple entries if needed
+    /// to adhere to platform limits (e.g. Windows Credential Manager 2560-byte / 1280-char UTF-16 limit).
+    fn save_to_keyring(json_str: &str) -> Result<(), String> {
+        let utf16_len = json_str.encode_utf16().count();
+        if utf16_len <= KEYRING_CHUNK_SIZE {
+            let entry = Entry::new(KEYRING_SERVICE, KEYRING_USER).map_err(|e| e.to_string())?;
+            entry.set_password(json_str).map_err(|e| e.to_string())?;
+            Self::cleanup_keyring_chunks(0, 16);
+            return Ok(());
+        }
+
+        let chunks = Self::split_into_chunks(json_str, KEYRING_CHUNK_SIZE);
+        let chunk_count = chunks.len();
+
+        // 1. Write each chunk entry first
+        for (i, chunk) in chunks.iter().enumerate() {
+            let chunk_user = format!("{KEYRING_USER}_{i}");
+            let entry = Entry::new(KEYRING_SERVICE, &chunk_user).map_err(|e| e.to_string())?;
+            entry.set_password(chunk).map_err(|e| e.to_string())?;
+        }
+
+        // 2. Write metadata header to main entry
+        let main_entry = Entry::new(KEYRING_SERVICE, KEYRING_USER).map_err(|e| e.to_string())?;
+        let header = format!("{KEYRING_CHUNKS_PREFIX}{chunk_count}");
+        main_entry
+            .set_password(&header)
+            .map_err(|e| e.to_string())?;
+
+        // 3. Clean up any previous chunks beyond current count
+        Self::cleanup_keyring_chunks(chunk_count, chunk_count + 16);
+
+        Ok(())
+    }
+
+    /// Load token payload from OS Keyring, reassembling chunks if chunking was used.
+    fn load_from_keyring() -> Result<Option<String>, String> {
+        let main_entry = match Entry::new(KEYRING_SERVICE, KEYRING_USER) {
+            Ok(entry) => entry,
+            Err(e) => return Err(e.to_string()),
+        };
+
+        let main_val = match main_entry.get_password() {
+            Ok(val) => val,
+            Err(keyring::Error::NoEntry) => return Ok(None),
+            Err(e) => return Err(e.to_string()),
+        };
+
+        if let Some(count_str) = main_val.strip_prefix(KEYRING_CHUNKS_PREFIX) {
+            let count: usize = count_str
+                .parse()
+                .map_err(|_| format!("Invalid chunk count in keyring header: '{count_str}'"))?;
+
+            let mut combined = String::new();
+            for i in 0..count {
+                let chunk_user = format!("{KEYRING_USER}_{i}");
+                let chunk_entry =
+                    Entry::new(KEYRING_SERVICE, &chunk_user).map_err(|e| e.to_string())?;
+                match chunk_entry.get_password() {
+                    Ok(chunk) => combined.push_str(&chunk),
+                    Err(e) => {
+                        return Err(format!(
+                            "Missing or corrupted token chunk {i}/{count} in keyring: {e}"
+                        ));
+                    }
+                }
+            }
+            Ok(Some(combined))
+        } else {
+            // Unchunked direct value
+            Ok(Some(main_val))
+        }
+    }
+
+    /// Remove orphaned or obsolete keyring chunk entries
+    fn cleanup_keyring_chunks(from: usize, to: usize) {
+        for i in from..to {
+            let chunk_user = format!("{KEYRING_USER}_{i}");
+            if let Ok(entry) = Entry::new(KEYRING_SERVICE, &chunk_user) {
+                let _ = entry.delete_credential();
+            }
+        }
+    }
+
+    /// Clear all stored tokens from both OS Keyring and fallback session file
+    pub fn clear_stored_tokens() -> Result<(), String> {
+        if let Ok(entry) = Entry::new(KEYRING_SERVICE, KEYRING_USER) {
+            if let Ok(val) = entry.get_password() {
+                if let Some(count_str) = val.strip_prefix(KEYRING_CHUNKS_PREFIX) {
+                    if let Ok(count) = count_str.parse::<usize>() {
+                        Self::cleanup_keyring_chunks(0, count);
+                    }
+                }
+            }
+            let _ = entry.delete_credential();
+        }
+        Self::cleanup_keyring_chunks(0, 16);
+        let fallback_path = Self::fallback_token_path();
+        if fallback_path.exists() {
+            let _ = fs::remove_file(fallback_path);
+        }
+        Ok(())
+    }
+
     /// Save token to OS Keyring, falling back to local file ONLY if explicitly opted in
-    fn save_tokens(&self, tokens: &TokenStore) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    fn save_tokens(
+        &self,
+        tokens: &TokenStore,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let json_str = serde_json::to_string(tokens)?;
 
         // Try OS Keyring first
-        let keyring_err = match Entry::new(KEYRING_SERVICE, KEYRING_USER) {
-            Ok(entry) => match entry.set_password(&json_str) {
-                Ok(()) => {
-                    // If an old fallback file exists from previous runs, remove it now that keyring succeeded
-                    let fallback_path = Self::fallback_token_path();
-                    if fallback_path.exists() {
-                        let _ = fs::remove_file(fallback_path);
-                    }
-                    return Ok(());
+        let keyring_err = match Self::save_to_keyring(&json_str) {
+            Ok(()) => {
+                // If an old fallback file exists from previous runs, remove it now that keyring succeeded
+                let fallback_path = Self::fallback_token_path();
+                if fallback_path.exists() {
+                    let _ = fs::remove_file(fallback_path);
                 }
-                Err(e) => Some(e.to_string()),
-            },
-            Err(e) => Some(e.to_string()),
+                return Ok(());
+            }
+            Err(e) => Some(e),
         };
 
         let err_desc = keyring_err.unwrap_or_else(|| "Unknown keyring failure".to_string());
@@ -440,5 +575,67 @@ mod tests {
         assert!(AuthManager::validate_tenant_id("").is_err());
         assert!(AuthManager::validate_tenant_id("tenant/with/slashes").is_err());
         assert!(AuthManager::validate_tenant_id("tenant?query=evil").is_err());
+    }
+
+    #[test]
+    fn test_split_into_chunks_ascii() {
+        let long_payload = "A".repeat(3500);
+        let chunks = AuthManager::split_into_chunks(&long_payload, 1000);
+        assert_eq!(chunks.len(), 4);
+        assert_eq!(chunks[0].len(), 1000);
+        assert_eq!(chunks[1].len(), 1000);
+        assert_eq!(chunks[2].len(), 1000);
+        assert_eq!(chunks[3].len(), 500);
+        assert_eq!(chunks.concat(), long_payload);
+    }
+
+    #[test]
+    fn test_split_into_chunks_unicode() {
+        // Each emoji is 4 UTF-8 bytes and 2 UTF-16 code units
+        let emojis = "🎉🚀🦀".repeat(10);
+        let chunks = AuthManager::split_into_chunks(&emojis, 10);
+        for chunk in &chunks {
+            assert!(chunk.encode_utf16().count() <= 10);
+        }
+        assert_eq!(chunks.concat(), emojis);
+    }
+
+    #[test]
+    fn test_split_into_chunks_empty() {
+        let chunks = AuthManager::split_into_chunks("", 1000);
+        assert!(chunks.is_empty());
+    }
+
+    #[test]
+    fn test_keyring_storage_large_token_roundtrip() {
+        let large_token_store = TokenStore {
+            access_token: "eyJ0eXAi...".to_string() + &"A".repeat(2500),
+            refresh_token: Some("0.ARw...".to_string() + &"B".repeat(1200)),
+            expires_at: Some(1_750_000_000),
+        };
+
+        let json_str = serde_json::to_string(&large_token_store).expect("serialize token store");
+        // Verify payload exceeds Windows 2560-byte / 1280-char UTF-16 limit
+        assert!(json_str.encode_utf16().count() > 2560);
+
+        // Save to keyring (will chunk across multiple entries)
+        let save_result = AuthManager::save_to_keyring(&json_str);
+        if let Err(ref e) = save_result {
+            // In headless CI without desktop keyring available, skip
+            eprintln!("Skipping live keyring test in headless env: {e}");
+            return;
+        }
+
+        // Load back and verify reassembly
+        let loaded = AuthManager::load_from_keyring().expect("load from keyring");
+        assert!(loaded.is_some());
+        let loaded_store: TokenStore =
+            serde_json::from_str(&loaded.unwrap()).expect("parse reassembled json");
+        assert_eq!(loaded_store.access_token, large_token_store.access_token);
+        assert_eq!(loaded_store.refresh_token, large_token_store.refresh_token);
+        assert_eq!(loaded_store.expires_at, large_token_store.expires_at);
+
+        // Cleanup
+        let _ = AuthManager::clear_stored_tokens();
     }
 }

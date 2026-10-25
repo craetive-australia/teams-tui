@@ -1,6 +1,6 @@
 [package]
 name = "teams-tui"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
 authors = ["Teams TUI Team"]
 description = "Terminal User Interface for Microsoft Teams using Microsoft Graph API"
