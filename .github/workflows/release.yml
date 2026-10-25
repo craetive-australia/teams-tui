@@ -73,24 +73,34 @@ jobs:
           draft: false
           generate_release_notes: true
 
-  publish-package-managers:
-    name: Publish to Package Managers
+  publish-crates-io:
+    name: Publish to crates.io
     needs: build-and-release
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Publish to crates.io
         run: cargo publish --token ${{ secrets.CRATES_IO_TOKEN }} || echo "Already published or failed"
 
-      - name: Publish Homebrew Tap
-        continue-on-error: true
-        env:
-          TAP_REPO: "craetive-australia/homebrew-teams-tui"
-          GITHUB_TOKEN: ${{ secrets.PAT }}
+  publish-homebrew:
+    name: Publish to Homebrew Tap
+    needs: build-and-release
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    env:
+      TAP_REPO: "craetive-australia/homebrew-teams-tui"
+      GITHUB_TOKEN: ${{ secrets.PAT }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Update Homebrew Formula
         run: |
           REF_NAME="${{ inputs.tag || github.ref_name }}"
           VERSION="${REF_NAME#v}"
@@ -137,10 +147,23 @@ jobs:
           git commit -m "Update teams-tui to ${VERSION}" || true
           git push origin main
 
+  publish-scoop:
+    name: Update Scoop Manifest
+    needs: build-and-release
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      GITHUB_TOKEN: ${{ secrets.PAT || secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Update Scoop Manifest
-        continue-on-error: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.PAT || secrets.GITHUB_TOKEN }}
         run: |
           REF_NAME="${{ inputs.tag || github.ref_name }}"
           VERSION="${REF_NAME#v}"
@@ -165,8 +188,13 @@ jobs:
                        --base main \
                        --head "${BRANCH_NAME}" || echo "PR creation skipped or already exists"
 
+  publish-winget:
+    name: Submit to WinGet
+    needs: build-and-release
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
       - name: Submit to Winget
-        continue-on-error: true
         uses: vedantmgoyal2009/winget-releaser@v2
         with:
           identifier: Craetive.teams-tui

@@ -51,21 +51,29 @@ If you encounter an "Admin Consent Required" error during login, please refer to
 
 ## Configuration
 
-`teams-tui` can be configured via a `config.toml` file located at:
+`teams-tui` can be configured via CLI flags, environment variables, or a `config.toml` file located at:
 * **Windows**: `%APPDATA%\microsoft\teams-tui\config\config.toml`
 * **macOS/Linux**: `~/.config/teams-tui/config.toml`
 
 Available options (with defaults):
 ```toml
 # The Microsoft Graph API Client ID
-client_id = "14d82eec-204b-4a2f-88e6-54b83fb904e6"
+client_id = "86a0c6ec-236e-410b-a210-a479b1f15aa3"
 
-# Polling intervals in seconds
-active_chat_poll_interval = 5
-active_channel_poll_interval = 15
+# Microsoft Entra Tenant ID ('common', 'organizations', or tenant GUID)
+tenant_id = "common"
+
+# Polling interval in seconds (minimum 5s for chat, 15s for channels)
+poll_interval_secs = 5
 
 # Enable debug logging (saved to teams-tui.log)
-debug_logging = false
+debug = false
+
+# Path to log file
+log_file = "teams-tui.log"
+
+# Allow fallback token file storage when OS Keyring is unavailable (headless Linux)
+allow_insecure_token_file = false
 ```
 
 ## Privacy & Telemetry

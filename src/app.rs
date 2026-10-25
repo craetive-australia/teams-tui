@@ -1,4 +1,5 @@
 use crate::graph::{ChannelSummary, ChatMessage, ChatSummary, OrgUser, PresenceInfo, TeamSummary, UserProfile};
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum FocusedPane {
@@ -40,14 +41,32 @@ pub enum ActiveConversation {
 }
 
 impl ActiveConversation {
+    #[must_use]
     pub fn cache_key(&self) -> String {
         match self {
-            ActiveConversation::Chat { id, .. } => format!("chat:{}", id),
+            ActiveConversation::Chat { id, .. } => format!("chat:{id}"),
             ActiveConversation::Channel { team_id, channel_id, .. } => {
-                format!("channel:{}:{}", team_id, channel_id)
+                format!("channel:{team_id}:{channel_id}")
             }
         }
     }
+}
+
+#[derive(Default, Debug)]
+pub struct SearchModalState {
+    pub is_open: bool,
+    pub query: String,
+    pub results: Vec<OrgUser>,
+    pub selected_idx: usize,
+    pub is_searching: bool,
+    pub directory_search_denied: bool,
+    pub error_msg: Option<String>,
+}
+
+#[derive(Default, Debug)]
+pub struct StatusModalState {
+    pub is_open: bool,
+    pub selected_idx: usize,
 }
 
 pub struct App {
@@ -59,6 +78,7 @@ pub struct App {
     pub messages: Vec<ChatMessage>,
     pub message_scroll: usize,
     pub input_buffer: String,
+    /// Character index (not raw byte offset)
     pub cursor_pos: usize,
     pub focused_pane: FocusedPane,
     pub status_message: String,
@@ -66,22 +86,14 @@ pub struct App {
     pub is_syncing: bool,
     pub should_quit: bool,
     // Conversation cache
-    pub message_cache: std::collections::HashMap<String, Vec<ChatMessage>>,
-    pub user_presences: std::collections::HashMap<String, PresenceInfo>,
+    pub message_cache: HashMap<String, Vec<ChatMessage>>,
+    pub user_presences: HashMap<String, PresenceInfo>,
     // Raw lists for fast contact lookups & channel dynamic updates
     pub raw_chats: Vec<ChatSummary>,
     pub raw_teams: Vec<(TeamSummary, Vec<ChannelSummary>)>,
-    // Organisation User Search Modal
-    pub is_search_modal_open: bool,
-    pub search_query: String,
-    pub search_results: Vec<OrgUser>,
-    pub selected_search_idx: usize,
-    pub is_searching: bool,
-    pub directory_search_denied: bool,
-    pub search_error_msg: Option<String>,
-    // Status Modal
-    pub is_status_modal_open: bool,
-    pub selected_status_idx: usize,
+    // Modals
+    pub search: SearchModalState,
+    pub status_modal: StatusModalState,
 }
 
 pub const STATUS_OPTIONS: &[(&str, &str, &str, &str)] = &[
@@ -93,7 +105,14 @@ pub const STATUS_OPTIONS: &[(&str, &str, &str, &str)] = &[
     ("Reset (Auto)", "🔄", "", ""),
 ];
 
+impl Default for App {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl App {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             current_user: None,
@@ -110,87 +129,81 @@ impl App {
             is_loading: false,
             is_syncing: false,
             should_quit: false,
-            message_cache: std::collections::HashMap::new(),
-            user_presences: std::collections::HashMap::new(),
+            message_cache: HashMap::new(),
+            user_presences: HashMap::new(),
             raw_chats: Vec::new(),
             raw_teams: Vec::new(),
-            is_search_modal_open: false,
-            search_query: String::new(),
-            search_results: Vec::new(),
-            selected_search_idx: 0,
-            is_searching: false,
-            directory_search_denied: false,
-            search_error_msg: None,
-            is_status_modal_open: false,
-            selected_status_idx: 0,
+            search: SearchModalState::default(),
+            status_modal: StatusModalState::default(),
         }
     }
 
     pub fn open_search(&mut self) {
-        self.is_search_modal_open = true;
-        self.search_query.clear();
-        self.search_results.clear();
-        self.selected_search_idx = 0;
-        self.is_searching = false;
-        self.search_error_msg = None;
+        self.search.is_open = true;
+        self.search.query.clear();
+        self.search.results.clear();
+        self.search.selected_idx = 0;
+        self.search.is_searching = false;
+        self.search.error_msg = None;
     }
 
     pub fn close_search(&mut self) {
-        self.is_search_modal_open = false;
-        self.search_query.clear();
-        self.search_results.clear();
-        self.selected_search_idx = 0;
-        self.is_searching = false;
-        self.search_error_msg = None;
+        self.search.is_open = false;
+        self.search.query.clear();
+        self.search.results.clear();
+        self.search.selected_idx = 0;
+        self.search.is_searching = false;
+        self.search.error_msg = None;
     }
 
     pub fn open_status_modal(&mut self) {
-        self.is_status_modal_open = true;
-        self.selected_status_idx = 0;
+        self.status_modal.is_open = true;
+        self.status_modal.selected_idx = 0;
     }
 
     pub fn close_status_modal(&mut self) {
-        self.is_status_modal_open = false;
+        self.status_modal.is_open = false;
     }
 
     pub fn status_up(&mut self) {
-        if self.selected_status_idx == 0 {
-            self.selected_status_idx = STATUS_OPTIONS.len() - 1;
+        if self.status_modal.selected_idx == 0 {
+            self.status_modal.selected_idx = STATUS_OPTIONS.len() - 1;
         } else {
-            self.selected_status_idx -= 1;
+            self.status_modal.selected_idx -= 1;
         }
     }
 
     pub fn status_down(&mut self) {
-        self.selected_status_idx = (self.selected_status_idx + 1) % STATUS_OPTIONS.len();
+        self.status_modal.selected_idx = (self.status_modal.selected_idx + 1) % STATUS_OPTIONS.len();
     }
 
     pub fn search_char(&mut self, c: char) {
-        self.search_query.push(c);
+        self.search.query.push(c);
     }
 
     pub fn search_backspace(&mut self) {
-        self.search_query.pop();
+        self.search.query.pop();
     }
 
     pub fn search_down(&mut self) {
-        if !self.search_results.is_empty() {
-            self.selected_search_idx = (self.selected_search_idx + 1) % self.search_results.len();
+        if !self.search.results.is_empty() {
+            self.search.selected_idx = (self.search.selected_idx + 1) % self.search.results.len();
         }
     }
 
     pub fn search_up(&mut self) {
-        if !self.search_results.is_empty() {
-            if self.selected_search_idx == 0 {
-                self.selected_search_idx = self.search_results.len() - 1;
+        if !self.search.results.is_empty() {
+            if self.search.selected_idx == 0 {
+                self.search.selected_idx = self.search.results.len() - 1;
             } else {
-                self.selected_search_idx -= 1;
+                self.search.selected_idx -= 1;
             }
         }
     }
 
+    #[must_use]
     pub fn selected_search_user(&self) -> Option<&OrgUser> {
-        self.search_results.get(self.selected_search_idx)
+        self.search.results.get(self.search.selected_idx)
     }
 
     pub fn set_status(&mut self, msg: impl Into<String>) {
@@ -247,15 +260,42 @@ impl App {
         self.message_scroll = self.message_scroll.saturating_sub(3);
     }
 
+    /// UTF-8 safe char insertion at current character index
     pub fn insert_char(&mut self, c: char) {
-        self.input_buffer.insert(self.cursor_pos, c);
+        let byte_offset = self
+            .input_buffer
+            .char_indices()
+            .nth(self.cursor_pos)
+            .map_or(self.input_buffer.len(), |(idx, _)| idx);
+
+        self.input_buffer.insert(byte_offset, c);
         self.cursor_pos += 1;
     }
 
+    /// UTF-8 safe char removal before current character index
     pub fn backspace(&mut self) {
         if self.cursor_pos > 0 && !self.input_buffer.is_empty() {
             self.cursor_pos -= 1;
-            self.input_buffer.remove(self.cursor_pos);
+            let byte_offset = self
+                .input_buffer
+                .char_indices()
+                .nth(self.cursor_pos)
+                .map(|(idx, _)| idx);
+
+            if let Some(idx) = byte_offset {
+                self.input_buffer.remove(idx);
+            }
+        }
+    }
+
+    pub fn move_cursor_left(&mut self) {
+        self.cursor_pos = self.cursor_pos.saturating_sub(1);
+    }
+
+    pub fn move_cursor_right(&mut self) {
+        let char_count = self.input_buffer.chars().count();
+        if self.cursor_pos < char_count {
+            self.cursor_pos += 1;
         }
     }
 
@@ -266,6 +306,7 @@ impl App {
         text
     }
 
+    #[must_use]
     pub fn currently_selected_conversation(&self) -> Option<ActiveConversation> {
         match self.sidebar_items.get(self.selected_sidebar_idx)? {
             SidebarItem::Chat { chat, title } => Some(ActiveConversation::Chat {
@@ -279,12 +320,13 @@ impl App {
             } => Some(ActiveConversation::Channel {
                 team_id: team_id.clone(),
                 channel_id: channel.id.clone(),
-                title: format!("{} > #{}", team_name, channel.display_name),
+                title: format!("{team_name} > #{}", channel.sanitized_name()),
             }),
             _ => None,
         }
     }
 
+    #[must_use]
     pub fn get_cached_messages(&self, conv: &ActiveConversation) -> Option<&Vec<ChatMessage>> {
         self.message_cache.get(&conv.cache_key())
     }
@@ -294,13 +336,14 @@ impl App {
     }
 
     /// Search local contacts from existing chats and teams instantly (0ms latency, works offline / without directory permissions)
+    #[must_use]
     pub fn search_local_contacts(&self, query: &str) -> Vec<OrgUser> {
         let q = query.trim().to_lowercase();
         if q.is_empty() {
             return Vec::new();
         }
 
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = HashSet::new();
         let mut results = Vec::new();
 
         let me_name = self
@@ -316,16 +359,17 @@ impl App {
                     if !name.trim().is_empty() && name.to_lowercase() != me_name {
                         let email = member.email.as_deref().unwrap_or("");
                         if (name.to_lowercase().contains(&q) || email.to_lowercase().contains(&q))
-                            && seen.insert(name.to_lowercase()) {
-                                results.push(OrgUser {
-                                    id: member.user_id.clone().or_else(|| member.id.clone()).unwrap_or_default(),
-                                    display_name: Some(name.clone()),
-                                    user_principal_name: member.email.clone(),
-                                    mail: member.email.clone(),
-                                    job_title: Some("Recent Chat Contact".to_string()),
-                                    department: None,
-                                });
-                            }
+                            && seen.insert(name.to_lowercase())
+                        {
+                            results.push(OrgUser {
+                                id: member.user_id.clone().or_else(|| member.id.clone()).unwrap_or_default(),
+                                display_name: Some(name.clone()),
+                                user_principal_name: member.email.clone(),
+                                mail: member.email.clone(),
+                                job_title: Some("Recent Chat Contact".to_string()),
+                                department: None,
+                            });
+                        }
                     }
                 }
             }
@@ -335,14 +379,16 @@ impl App {
     }
 
     /// Find an existing 1:1 chat for a given user if already in chat list
+    #[must_use]
     pub fn find_existing_chat(&self, target_name: &str, target_id: &str) -> Option<ChatSummary> {
         for chat in &self.raw_chats {
             if !target_id.is_empty()
                 && chat.members.iter().any(|m| {
                     m.user_id.as_deref() == Some(target_id) || m.id.as_deref() == Some(target_id)
-                }) {
-                    return Some(chat.clone());
-                }
+                })
+            {
+                return Some(chat.clone());
+            }
             if chat.members.iter().any(|m| {
                 m.display_name
                     .as_deref()
@@ -407,7 +453,7 @@ impl App {
                 for ch in channels {
                     items.push(SidebarItem::Channel {
                         team_id: team.id.clone(),
-                        team_name: team.display_name.clone(),
+                        team_name: team.sanitized_name(),
                         channel: ch.clone(),
                     });
                 }
@@ -429,5 +475,103 @@ impl App {
                 .position(|item| !matches!(item, SidebarItem::SectionHeader(_)))
                 .unwrap_or(0);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_utf8_input_and_backspace() {
+        let mut app = App::new();
+
+        // Insert multi-byte emoji and accents
+        app.insert_char('H');
+        app.insert_char('é');
+        app.insert_char('l');
+        app.insert_char('l');
+        app.insert_char('o');
+        app.insert_char(' ');
+        app.insert_char('👋');
+
+        assert_eq!(app.input_buffer, "Héllo 👋");
+        assert_eq!(app.cursor_pos, 7);
+
+        // Move left across multi-byte boundary
+        app.move_cursor_left();
+        assert_eq!(app.cursor_pos, 6);
+
+        // Insert char before emoji
+        app.insert_char('!');
+        assert_eq!(app.input_buffer, "Héllo !👋");
+        assert_eq!(app.cursor_pos, 7);
+
+        // Backspace removes the '!'
+        app.backspace();
+        assert_eq!(app.input_buffer, "Héllo 👋");
+        assert_eq!(app.cursor_pos, 6);
+
+        // Move to end and backspace the emoji
+        app.move_cursor_right();
+        assert_eq!(app.cursor_pos, 7);
+        app.backspace();
+        assert_eq!(app.input_buffer, "Héllo ");
+        assert_eq!(app.cursor_pos, 6);
+    }
+
+    #[test]
+    fn test_active_conversation_cache_key() {
+        let chat = ActiveConversation::Chat {
+            id: "123".to_string(),
+            title: "Test".to_string(),
+        };
+        assert_eq!(chat.cache_key(), "chat:123");
+
+        let channel = ActiveConversation::Channel {
+            team_id: "teamA".to_string(),
+            channel_id: "general".to_string(),
+            title: "General".to_string(),
+        };
+        assert_eq!(channel.cache_key(), "channel:teamA:general");
+    }
+
+    #[test]
+    fn test_search_local_contacts() {
+        let mut app = App::new();
+        app.current_user = Some(UserProfile {
+            id: "me-id".to_string(),
+            display_name: Some("Myself".to_string()),
+            user_principal_name: Some("me@example.com".to_string()),
+            mail: Some("me@example.com".to_string()),
+        });
+
+        app.raw_chats = vec![ChatSummary {
+            id: "chat-1".to_string(),
+            topic: None,
+            chat_type: "oneOnOne".to_string(),
+            members: vec![
+                crate::graph::ChatMember {
+                    id: Some("m1".to_string()),
+                    display_name: Some("Alice Smith".to_string()),
+                    user_id: Some("alice-id".to_string()),
+                    email: Some("alice@example.com".to_string()),
+                },
+                crate::graph::ChatMember {
+                    id: Some("m2".to_string()),
+                    display_name: Some("Myself".to_string()),
+                    user_id: Some("me-id".to_string()),
+                    email: Some("me@example.com".to_string()),
+                },
+            ],
+            last_updated_date_time: None,
+        }];
+
+        let results = app.search_local_contacts("alice");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].display_name.as_deref(), Some("Alice Smith"));
+
+        let found = app.find_existing_chat("Alice Smith", "alice-id");
+        assert!(found.is_some());
     }
 }

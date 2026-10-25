@@ -33,9 +33,9 @@ pub fn render(frame: &mut Frame, app: &App) {
     render_input(frame, app, main_layout[2]);
     render_footer(frame, app, main_layout[3]);
 
-    if app.is_search_modal_open {
+    if app.search.is_open {
         render_search_modal(frame, app);
-    } else if app.is_status_modal_open {
+    } else if app.status_modal.is_open {
         render_status_modal(frame, app);
     }
 }
@@ -61,8 +61,8 @@ fn render_header(frame: &mut Frame, app: &App, area: Rect) {
 
     let title_spans = vec![
         Span::styled("Teams TUI ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-        Span::styled(format!("| User: {} ", user_name), Style::default().fg(Color::White)),
-        Span::styled(format!("| {} ", presence_icon), Style::default().fg(presence_color)),
+        Span::styled(format!("| User: {user_name} "), Style::default().fg(Color::White)),
+        Span::styled(format!("| {presence_icon} "), Style::default().fg(presence_color)),
         Span::styled(presence_text, Style::default().fg(presence_color).add_modifier(Modifier::BOLD)),
     ];
 
@@ -97,7 +97,7 @@ fn render_sidebar(frame: &mut Frame, app: &App, area: Rect) {
                 SidebarItem::Chat { title, chat } => {
                     let is_active = matches!(&app.active_conversation, Some(ActiveConversation::Chat { id, .. }) if id == &chat.id);
                     let marker = if is_selected { "▶ " } else { "  " };
-                    
+
                     let mut presence_icon = if is_active { "● " } else { "  " };
                     let mut presence_color = Color::Green;
 
@@ -134,13 +134,13 @@ fn render_sidebar(frame: &mut Frame, app: &App, area: Rect) {
                     ListItem::new(Line::from(vec![
                         Span::styled(marker, Style::default().fg(Color::Yellow)),
                         Span::styled(presence_icon, Style::default().fg(presence_color)),
-                        Span::styled(format!(" {}", title), style),
+                        Span::styled(format!(" {title}"), style),
                     ]))
                 }
                 SidebarItem::TeamHeader { team, .. } => {
                     ListItem::new(Line::from(vec![
                         Span::styled("▾ ", Style::default().fg(Color::Cyan)),
-                        Span::styled(team.display_name.clone(), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                        Span::styled(team.sanitized_name(), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
                     ]))
                 }
                 SidebarItem::Channel {
@@ -163,7 +163,7 @@ fn render_sidebar(frame: &mut Frame, app: &App, area: Rect) {
                     ListItem::new(Line::from(vec![
                         Span::styled(marker, Style::default().fg(Color::Yellow)),
                         Span::styled(active_icon, Style::default().fg(Color::Green)),
-                        Span::styled(format!("#{}", channel.display_name), style),
+                        Span::styled(format!("#{}", channel.sanitized_name()), style),
                     ]))
                 }
             }
@@ -187,8 +187,8 @@ fn render_messages(frame: &mut Frame, app: &App, area: Rect) {
     let border_color = if is_focused { Color::Yellow } else { Color::DarkGray };
 
     let mut conv_title = match &app.active_conversation {
-        Some(ActiveConversation::Chat { title, .. }) => format!(" Chat: {} ", title),
-        Some(ActiveConversation::Channel { title, .. }) => format!(" Channel: {} ", title),
+        Some(ActiveConversation::Chat { title, .. }) => format!(" Chat: {title} "),
+        Some(ActiveConversation::Channel { title, .. }) => format!(" Channel: {title} "),
         None => " No conversation selected ".to_string(),
     };
 
@@ -227,8 +227,6 @@ fn render_messages(frame: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    // Graph API returns messages in reverse-chronological order (newest first).
-    // For natural reading in chat, we display chronologically (oldest at top, newest at bottom).
     let mut lines = Vec::new();
 
     for msg in app.messages.iter().rev() {
@@ -249,8 +247,7 @@ fn render_messages(frame: &mut Frame, app: &App, area: Rect) {
             .current_user
             .as_ref()
             .and_then(|u| u.display_name.as_deref())
-            .map(|name| name.eq_ignore_ascii_case(&sender))
-            .unwrap_or(false);
+            .is_some_and(|name| name.eq_ignore_ascii_case(&sender));
 
         let sender_style = if is_me {
             Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
@@ -259,8 +256,8 @@ fn render_messages(frame: &mut Frame, app: &App, area: Rect) {
         };
 
         lines.push(Line::from(vec![
-            Span::styled(format!("[{}] ", timestamp), Style::default().fg(Color::DarkGray)),
-            Span::styled(format!("{}:", sender), sender_style),
+            Span::styled(format!("[{timestamp}] "), Style::default().fg(Color::DarkGray)),
+            Span::styled(format!("{sender}:"), sender_style),
         ]));
 
         let content = msg.clean_content();
@@ -283,7 +280,7 @@ fn render_messages(frame: &mut Frame, app: &App, area: Rect) {
                     "angry" => "😡",
                     _ => "✨",
                 };
-                reaction_spans.push(Span::styled(format!("{} ", emoji), Style::default().fg(Color::Yellow)));
+                reaction_spans.push(Span::styled(format!("{emoji} "), Style::default().fg(Color::Yellow)));
             }
             lines.push(Line::from(reaction_spans));
         }
@@ -292,10 +289,11 @@ fn render_messages(frame: &mut Frame, app: &App, area: Rect) {
         lines.push(Line::raw(""));
     }
 
+    let scroll_offset = u16::try_from(app.message_scroll).unwrap_or(u16::MAX);
     let p = Paragraph::new(lines)
         .block(block)
         .wrap(Wrap { trim: false })
-        .scroll((app.message_scroll as u16, 0));
+        .scroll((scroll_offset, 0));
 
     frame.render_widget(p, area);
 }
@@ -305,15 +303,16 @@ fn render_input(frame: &mut Frame, app: &App, area: Rect) {
     let border_color = if is_focused { Color::Yellow } else { Color::DarkGray };
 
     let target_name = match &app.active_conversation {
-        Some(ActiveConversation::Chat { title, .. }) => title.as_str(),
-        Some(ActiveConversation::Channel { title, .. }) => title.as_str(),
+        Some(ActiveConversation::Chat { title, .. } | ActiveConversation::Channel { title, .. }) => {
+            title.as_str()
+        }
         None => "None (Select a conversation first)",
     };
 
     let title = if is_focused {
-        format!(" Message to: {} (Press Enter to Send, Esc to Exit) ", target_name)
+        format!(" Message to: {target_name} (Press Enter to Send, Esc to Exit) ")
     } else {
-        format!(" Message: {} (Press 'i' to type) ", target_name)
+        format!(" Message: {target_name} (Press 'i' to type) ")
     };
 
     let input_text = format!("> {}", app.input_buffer);
@@ -334,8 +333,9 @@ fn render_input(frame: &mut Frame, app: &App, area: Rect) {
 
     // Set terminal cursor in input box when focused
     if is_focused {
-        let cursor_x = area.x + 3 + app.cursor_pos as u16;
-        let cursor_y = area.y + 1;
+        let char_offset = u16::try_from(app.cursor_pos).unwrap_or(u16::MAX);
+        let cursor_x = area.x.saturating_add(3).saturating_add(char_offset);
+        let cursor_y = area.y.saturating_add(1);
         if cursor_x < area.x + area.width - 1 {
             frame.set_cursor_position((cursor_x, cursor_y));
         }
@@ -364,6 +364,7 @@ fn render_footer(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(footer, area);
 }
 
+#[allow(clippy::too_many_lines)]
 fn render_search_modal(frame: &mut Frame, app: &App) {
     let area = centered_rect(70, 60, frame.area());
     frame.render_widget(Clear, area);
@@ -378,15 +379,15 @@ fn render_search_modal(frame: &mut Frame, app: &App) {
         .split(area);
 
     // Search input block
-    let search_title = if app.is_searching {
+    let search_title = if app.search.is_searching {
         " Search Users (Searching directory & contacts...) "
-    } else if app.directory_search_denied {
+    } else if app.search.directory_search_denied {
         " Search Recent Contacts (Run 'teams-tui --login' for full directory) "
     } else {
         " Search Organisation Users & Contacts (Type Name or Email) "
     };
 
-    let search_input = Paragraph::new(format!("> {}", app.search_query))
+    let search_input = Paragraph::new(format!("> {}", app.search.query))
         .block(
             Block::default()
                 .borders(Borders::ALL)
@@ -398,17 +399,18 @@ fn render_search_modal(frame: &mut Frame, app: &App) {
     frame.render_widget(search_input, chunks[0]);
 
     // Position cursor in search box
-    let cursor_x = chunks[0].x + 3 + app.search_query.len() as u16;
-    let cursor_y = chunks[0].y + 1;
+    let query_chars = u16::try_from(app.search.query.chars().count()).unwrap_or(u16::MAX);
+    let cursor_x = chunks[0].x.saturating_add(3).saturating_add(query_chars);
+    let cursor_y = chunks[0].y.saturating_add(1);
     if cursor_x < chunks[0].x + chunks[0].width - 1 {
         frame.set_cursor_position((cursor_x, cursor_y));
     }
 
     // Results list
-    let results_title = if let Some(ref err) = app.search_error_msg {
-        format!(" Results ({}) [Note: {}] ", app.search_results.len(), err)
+    let results_title = if let Some(ref err) = app.search.error_msg {
+        format!(" Results ({}) [Note: {err}] ", app.search.results.len())
     } else {
-        format!(" Results ({}) ", app.search_results.len())
+        format!(" Results ({}) ", app.search.results.len())
     };
 
     let block = Block::default()
@@ -416,12 +418,12 @@ fn render_search_modal(frame: &mut Frame, app: &App) {
         .title(results_title)
         .border_style(Style::default().fg(Color::Cyan));
 
-    if app.search_results.is_empty() {
-        let msg = if let Some(ref err) = app.search_error_msg {
+    if app.search.results.is_empty() {
+        let msg = if let Some(ref err) = app.search.error_msg {
             err.as_str()
-        } else if app.search_query.trim().is_empty() {
+        } else if app.search.query.trim().is_empty() {
             "Type at least 1 character to search users in the organisation or recent contacts."
-        } else if app.is_searching {
+        } else if app.search.is_searching {
             "Searching directory and recent contacts..."
         } else {
             "No matching users or contacts found."
@@ -433,21 +435,22 @@ fn render_search_modal(frame: &mut Frame, app: &App) {
         frame.render_widget(empty_p, chunks[1]);
     } else {
         let items: Vec<ListItem> = app
-            .search_results
+            .search
+            .results
             .iter()
             .enumerate()
             .map(|(idx, user)| {
-                let is_selected = idx == app.selected_search_idx;
+                let is_selected = idx == app.search.selected_idx;
                 let prefix = if is_selected { "▶ " } else { "  " };
 
-                let name = user.display_name.as_deref().unwrap_or("Unknown");
-                let role = user.job_title.as_deref().unwrap_or("");
+                let name = user.sanitized_display_name();
+                let role = user.sanitized_job_title();
                 let email = user
                     .mail
                     .as_deref()
                     .or(user.user_principal_name.as_deref())
                     .unwrap_or("No email");
-                let dept = user.department.as_deref().unwrap_or("");
+                let dept = user.sanitized_department();
 
                 let name_style = if is_selected {
                     Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
@@ -455,20 +458,20 @@ fn render_search_modal(frame: &mut Frame, app: &App) {
                     Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
                 };
 
-                let subtext = if !dept.is_empty() {
-                    format!("{} • {}", email, dept)
-                } else {
+                let subtext = if dept.is_empty() {
                     email.to_string()
+                } else {
+                    format!("{email} • {dept}")
                 };
 
                 ListItem::new(vec![
                     Line::from(vec![
                         Span::styled(prefix, Style::default().fg(Color::Yellow)),
                         Span::styled(name, name_style),
-                        if !role.is_empty() {
-                            Span::styled(format!(" ({})", role), Style::default().fg(Color::DarkGray))
-                        } else {
+                        if role.is_empty() {
                             Span::raw("")
+                        } else {
+                            Span::styled(format!(" ({role})"), Style::default().fg(Color::DarkGray))
                         },
                     ]),
                     Line::from(vec![
@@ -507,7 +510,7 @@ fn render_status_modal(frame: &mut Frame, app: &App) {
         .iter()
         .enumerate()
         .map(|(idx, (label, icon, _, _))| {
-            let is_selected = idx == app.selected_status_idx;
+            let is_selected = idx == app.status_modal.selected_idx;
             let prefix = if is_selected { "▶ " } else { "  " };
             let style = if is_selected {
                 Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
@@ -517,7 +520,7 @@ fn render_status_modal(frame: &mut Frame, app: &App) {
 
             ListItem::new(Line::from(vec![
                 Span::styled(prefix, Style::default().fg(Color::Yellow)),
-                Span::styled(format!("{} ", icon), Style::default()),
+                Span::styled(format!("{icon} "), Style::default()),
                 Span::styled(*label, style),
             ]))
         })

@@ -1,27 +1,37 @@
 use chrono::Local;
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions};
 use std::io::Write;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
-static LOG_PATH: Mutex<Option<String>> = Mutex::new(None);
-static DEBUG_ENABLED: Mutex<bool> = Mutex::new(false);
+static DEBUG_ENABLED: AtomicBool = AtomicBool::new(false);
+static LOG_FILE: Mutex<Option<File>> = Mutex::new(None);
 
 pub fn init(path: &str, debug: bool) {
-    if let Ok(mut p) = LOG_PATH.lock() {
-        *p = Some(path.to_string());
+    DEBUG_ENABLED.store(debug, Ordering::Relaxed);
+
+    let mut options = OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
     }
-    if let Ok(mut d) = DEBUG_ENABLED.lock() {
-        *d = debug;
+
+    if let Ok(file) = options.open(path) {
+        if let Ok(mut lock) = LOG_FILE.lock() {
+            *lock = Some(file);
+        }
     }
 
     log_info(format!(
-        "=== Teams TUI Session Started (Debug: {}) ===",
-        debug
+        "=== Teams TUI Session Started (Debug: {debug}) ==="
     ));
 }
 
+#[must_use]
 pub fn is_debug() -> bool {
-    DEBUG_ENABLED.lock().map(|d| *d).unwrap_or(false)
+    DEBUG_ENABLED.load(Ordering::Relaxed)
 }
 
 pub fn log_info(msg: impl AsRef<str>) {
@@ -43,20 +53,10 @@ pub fn log_error(msg: impl AsRef<str>) {
 }
 
 fn write_entry(level: &str, msg: &str) {
-    if let Ok(path_guard) = LOG_PATH.lock() {
-        if let Some(ref path) = *path_guard {
+    if let Ok(mut lock) = LOG_FILE.lock() {
+        if let Some(ref mut file) = *lock {
             let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
-            let line = format!("[{}] [{}] {}\n", timestamp, level, msg);
-            let mut options = OpenOptions::new();
-            options.create(true).append(true);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::OpenOptionsExt;
-                options.mode(0o600);
-            }
-            if let Ok(mut file) = options.open(path) {
-                let _ = file.write_all(line.as_bytes());
-            }
+            let _ = writeln!(file, "[{timestamp}] [{level}] {msg}");
         }
     }
 }
