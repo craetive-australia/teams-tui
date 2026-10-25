@@ -172,5 +172,5 @@ jobs:
           identifier: Craetive.teams-tui
           version: ${{ inputs.tag || github.ref_name }}
           installers-regex: '\.zip$'
-          fork-user: vaanguarrdd
+          fork-user: craetive-australia
           token: ${{ secrets.PAT }}
