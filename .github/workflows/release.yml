@@ -170,7 +170,6 @@ jobs:
         uses: vedantmgoyal2009/winget-releaser@v2
         with:
           identifier: Craetive.teams-tui
-          version: ${{ inputs.tag || github.ref_name }}
           installers-regex: '\.zip$'
           fork-user: craetive-australia
           token: ${{ secrets.PAT }}
