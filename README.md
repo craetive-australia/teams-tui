@@ -22,7 +22,7 @@ cargo install teams-tui
 
 ### Windows (WinGet)
 ```powershell
-winget install teams-tui
+winget install Craetive.teams-tui
 ```
 
 ### Pre-compiled Binaries
