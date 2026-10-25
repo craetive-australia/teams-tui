@@ -14,6 +14,8 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  id-token: write
+  attestations: write
 
 jobs:
   build-and-release:
@@ -51,6 +53,10 @@ jobs:
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }}
 
+      - name: Sign binary with ad-hoc signature (macOS)
+        if: matrix.os == 'macos-latest'
+        run: codesign --force --sign - target/${{ matrix.target }}/release/teams-tui
+
       - name: Rename and compress binary (Unix)
         if: matrix.os != 'windows-latest'
         run: |
@@ -63,6 +69,45 @@ jobs:
           Move-Item -Path "target\${{ matrix.target }}\release\teams-tui.exe" -Destination "${{ matrix.artifact_name }}"
           Compress-Archive -Path "${{ matrix.artifact_name }}" -DestinationPath "${{ matrix.artifact_name }}.zip"
 
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign release artifacts with Cosign (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          cosign sign-blob --yes \
+            --bundle "${{ matrix.artifact_name }}.sigstore.json" \
+            "${{ matrix.artifact_name }}"
+          cosign sign-blob --yes \
+            --bundle "${{ matrix.artifact_name }}.tar.gz.sigstore.json" \
+            "${{ matrix.artifact_name }}.tar.gz"
+
+      - name: Sign release artifacts with Cosign (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          cosign sign-blob --yes `
+            --bundle "${{ matrix.artifact_name }}.sigstore.json" `
+            "${{ matrix.artifact_name }}"
+          cosign sign-blob --yes `
+            --bundle "${{ matrix.artifact_name }}.zip.sigstore.json" `
+            "${{ matrix.artifact_name }}.zip"
+
+      - name: Attest Build Provenance (Unix)
+        if: matrix.os != 'windows-latest'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            ${{ matrix.artifact_name }}
+            ${{ matrix.artifact_name }}.tar.gz
+
+      - name: Attest Build Provenance (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            ${{ matrix.artifact_name }}
+            ${{ matrix.artifact_name }}.zip
+
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v1
         with:
@@ -70,6 +115,7 @@ jobs:
           files: |
             *.tar.gz
             *.zip
+            *.sigstore.json
           draft: false
           generate_release_notes: true
 

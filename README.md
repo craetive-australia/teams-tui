@@ -26,7 +26,23 @@ winget install Craetive.teams-tui
 ```
 
 ### Pre-compiled Binaries
-You can download the latest binaries for Windows, macOS, and Linux from the [Releases](https://github.com/andre/teams-tui/releases) page.
+You can download the latest binaries for Windows, macOS, and Linux from the [Releases](https://github.com/craetive-australia/teams-tui/releases) page.
+
+#### Verifying Signatures & Build Provenance
+All official release binaries and archives are cryptographically signed using **Sigstore Cosign** (keyless OIDC) and attested with **GitHub SLSA Build Provenance**.
+
+Verify build provenance with the GitHub CLI:
+```bash
+gh attestation verify teams-tui-windows-amd64.exe.zip --repo craetive-australia/teams-tui
+```
+
+Or verify with [Cosign](https://github.com/sigstore/cosign):
+```bash
+cosign verify-blob teams-tui-linux-amd64.tar.gz \
+  --bundle teams-tui-linux-amd64.tar.gz.sigstore.json \
+  --certificate-identity-regexp "https://github.com/craetive-australia/teams-tui/.*" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+```
 
 ## Getting Started
 
