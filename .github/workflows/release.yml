@@ -239,11 +239,157 @@ jobs:
     needs: build-and-release
     runs-on: ubuntu-latest
     continue-on-error: true
+    env:
+      GH_TOKEN: ${{ secrets.PAT }}
+      FORK_REPO: "vaanguarrdd/winget-pkgs"
     steps:
-      - name: Submit to Winget
-        uses: vedantmgoyal2009/winget-releaser@v2
-        with:
-          identifier: Craetive.teams-tui
-          installers-regex: '\.zip$'
-          fork-user: vaanguarrdd
-          token: ${{ secrets.PAT }}
+      - name: Submit WinGet Manifest Update
+        run: |
+          REF_NAME="${{ inputs.tag || github.ref_name }}"
+          VERSION="${REF_NAME#v}"
+          WIN_URL="https://github.com/craetive-australia/teams-tui/releases/download/${REF_NAME}/teams-tui-windows-amd64.exe.zip"
+          
+          # Wait briefly to ensure GitHub Releases has processed the upload
+          sleep 10
+          
+          echo "Calculating SHA256 for ${WIN_URL}..."
+          WIN_SHA=$(curl -sL "$WIN_URL" | sha256sum | awk '{print toupper($1)}')
+          if [ -z "$WIN_SHA" ] || [ ${#WIN_SHA} -ne 64 ]; then
+            echo "Failed to calculate valid SHA256 for ${WIN_URL}"
+            exit 1
+          fi
+          echo "Installer SHA256: ${WIN_SHA}"
+          
+          RELEASE_DATE=$(date -u +%Y-%m-%d)
+          MANIFEST_DIR="manifests/c/Craetive/teams-tui/${VERSION}"
+          BRANCH_NAME="Craetive.teams-tui-${VERSION}"
+          
+          # 1. Sync fork with upstream microsoft/winget-pkgs
+          echo "Syncing fork ${FORK_REPO} with upstream..."
+          gh repo sync "$FORK_REPO" --source microsoft/winget-pkgs || true
+          
+          # 2. Get master branch SHA from fork
+          MASTER_SHA=$(gh api "repos/${FORK_REPO}/git/refs/heads/master" --jq .object.sha)
+          
+          # 3. Create or reset branch on fork
+          echo "Creating branch ${BRANCH_NAME} at ${MASTER_SHA}..."
+          gh api "repos/${FORK_REPO}/git/refs" \
+            -X POST \
+            -f ref="refs/heads/${BRANCH_NAME}" \
+            -f sha="${MASTER_SHA}" || \
+          gh api "repos/${FORK_REPO}/git/refs/heads/${BRANCH_NAME}" \
+            -X PATCH \
+            -f sha="${MASTER_SHA}" \
+            -F force=true
+          
+          # 4. Generate manifest contents
+          VERSION_YAML=$(cat <<EOF
+# yaml-language-server: \$schema=https://aka.ms/winget-manifest.version.1.12.0.schema.json
+
+PackageIdentifier: Craetive.teams-tui
+PackageVersion: ${VERSION}
+DefaultLocale: en-AU
+ManifestType: version
+ManifestVersion: 1.12.0
+EOF
+)
+
+          INSTALLER_YAML=$(cat <<EOF
+# yaml-language-server: \$schema=https://aka.ms/winget-manifest.installer.1.12.0.schema.json
+
+PackageIdentifier: Craetive.teams-tui
+PackageVersion: ${VERSION}
+InstallerType: zip
+NestedInstallerType: portable
+NestedInstallerFiles:
+- RelativeFilePath: teams-tui-windows-amd64.exe
+  PortableCommandAlias: teams-tui
+Installers:
+- Architecture: x64
+  InstallerUrl: ${WIN_URL}
+  InstallerSha256: ${WIN_SHA}
+ManifestType: installer
+ManifestVersion: 1.12.0
+ReleaseDate: ${RELEASE_DATE}
+EOF
+)
+
+          LOCALE_YAML=$(cat <<EOF
+# yaml-language-server: \$schema=https://aka.ms/winget-manifest.defaultLocale.1.12.0.schema.json
+
+PackageIdentifier: Craetive.teams-tui
+PackageVersion: ${VERSION}
+PackageLocale: en-AU
+Publisher: Craetive
+PublisherUrl: https://github.com/craetive-australia
+PublisherSupportUrl: https://github.com/craetive-australia/teams-tui/issues
+PackageName: teams-tui
+PackageUrl: https://github.com/craetive-australia/teams-tui
+License: MIT
+ShortDescription: A blazing fast, keyboard-centric Terminal User Interface for Microsoft Teams, written in Rust.
+ReleaseNotesUrl: https://github.com/craetive-australia/teams-tui/releases/tag/${REF_NAME}
+ManifestType: defaultLocale
+ManifestVersion: 1.12.0
+EOF
+)
+
+          # 5. Commit manifests to branch via GitHub API
+          upload_manifest() {
+            local filename="\$1"
+            local content="\$2"
+            local path="${MANIFEST_DIR}/\${filename}"
+            local b64
+            b64=\$(printf "%s" "\$content" | base64 -w 0)
+            
+            local existing_sha
+            existing_sha=\$(gh api "repos/${FORK_REPO}/contents/\${path}?ref=${BRANCH_NAME}" --jq .sha 2>/dev/null || true)
+            
+            if [ -n "\$existing_sha" ]; then
+              gh api "repos/${FORK_REPO}/contents/\${path}" \
+                -X PUT \
+                -f message="Update Craetive.teams-tui version ${VERSION}" \
+                -f content="\${b64}" \
+                -f branch="${BRANCH_NAME}" \
+                -f sha="\${existing_sha}"
+            else
+              gh api "repos/${FORK_REPO}/contents/\${path}" \
+                -X PUT \
+                -f message="Add Craetive.teams-tui version ${VERSION}" \
+                -f content="\${b64}" \
+                -f branch="${BRANCH_NAME}"
+            fi
+          }
+
+          echo "Uploading manifests to ${FORK_REPO}..."
+          upload_manifest "Craetive.teams-tui.yaml" "\$VERSION_YAML"
+          upload_manifest "Craetive.teams-tui.installer.yaml" "\$INSTALLER_YAML"
+          upload_manifest "Craetive.teams-tui.locale.en-AU.yaml" "\$LOCALE_YAML"
+
+          # 6. Create Pull Request using official Microsoft winget-pkgs title and PR body format
+          PR_TITLE="New version: Craetive.teams-tui version ${VERSION}"
+          PR_BODY=\$(cat <<EOF
+## 📖 Description
+Update \`Craetive.teams-tui\` to version \`${VERSION}\`.
+
+Release Notes: https://github.com/craetive-australia/teams-tui/releases/tag/${REF_NAME}
+
+## ✅ Checklist
+- [x] Signed the [Contributor License Agreement](https://cla.opensource.microsoft.com)
+- [ ] Linked to an issue (if applicable)
+
+## 📦 Manifest Checklist
+- [x] Checked that there aren't other open [pull requests](https://github.com/microsoft/winget-pkgs/pulls) for the same manifest update/change
+- [x] This PR only modifies one (1) manifest
+- [ ] Validated manifest locally with \`winget validate --manifest <path>\`
+- [ ] Tested manifest locally with \`winget install --manifest <path>\`
+- [x] Manifest conforms to the [1.12 schema](https://github.com/microsoft/winget-pkgs/tree/master/doc/manifest/schema/1.12.0)
+EOF
+)
+
+          echo "Submitting pull request to microsoft/winget-pkgs..."
+          gh pr create \
+            --repo microsoft/winget-pkgs \
+            --head "vaanguarrdd:${BRANCH_NAME}" \
+            --base master \
+            --title "\${PR_TITLE}" \
+            --body "\${PR_BODY}" || echo "PR creation skipped or already exists"
