@@ -11,7 +11,7 @@ pub const DEFAULT_TENANT_ID: &str = "common";
 #[command(
     name = "teams-tui",
     author = "Teams TUI Team",
-    version = "0.1.0",
+    version,
     about = "Terminal User Interface for Microsoft Teams using Microsoft Graph API"
 )]
 pub struct CliArgs {
@@ -38,18 +38,24 @@ pub struct CliArgs {
     /// Path to debug log file (defaults to teams-tui.log)
     #[arg(long)]
     pub log_file: Option<String>,
+
+    /// Allow storing OAuth tokens in a plaintext fallback file if OS keyring is unavailable
+    #[arg(long)]
+    pub allow_insecure_token_file: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub client_id: String,
     pub tenant_id: String,
-    #[serde(default = "default_poll_interval")]
+    #[serde(default = "default_poll_interval", alias = "active_chat_poll_interval")]
     pub poll_interval_secs: u64,
-    #[serde(default)]
+    #[serde(default, alias = "debug_logging")]
     pub debug: bool,
     #[serde(default = "default_log_file")]
     pub log_file: String,
+    #[serde(default)]
+    pub allow_insecure_token_file: bool,
 }
 
 fn default_poll_interval() -> u64 {
@@ -68,6 +74,7 @@ impl Default for AppConfig {
             poll_interval_secs: 5,
             debug: false,
             log_file: default_log_file(),
+            allow_insecure_token_file: false,
         }
     }
 }
@@ -99,19 +106,22 @@ impl AppConfig {
         let mut modified = false;
 
         if let Some(ref cid) = args.client_id {
-            config.client_id = cid.clone();
+            config.client_id.clone_from(cid);
             modified = true;
         }
         if let Some(ref tid) = args.tenant_id {
-            config.tenant_id = tid.clone();
+            config.tenant_id.clone_from(tid);
             modified = true;
         }
         if args.debug {
             config.debug = true;
         }
         if let Some(ref lf) = args.log_file {
-            config.log_file = lf.clone();
+            config.log_file.clone_from(lf);
             modified = true;
+        }
+        if args.allow_insecure_token_file {
+            config.allow_insecure_token_file = true;
         }
 
         if modified {
