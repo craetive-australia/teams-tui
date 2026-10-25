@@ -26,8 +26,16 @@ directories = "5.0"
 
 # CLI & Security
 clap = { version = "4.5", features = ["derive", "env"] }
-keyring = { version = "3.0", features = ["windows-native", "apple-native", "sync-secret-service"] }
 chrono = { version = "0.4", features = ["serde"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3.0", features = ["windows-native"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3.0", features = ["apple-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3.0", features = ["linux-native"] }
 
 [profile.release]
 opt-level = "s"
