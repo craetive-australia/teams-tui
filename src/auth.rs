@@ -102,7 +102,7 @@ impl AuthManager {
         force_login: bool,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         if force_login {
-            let _ = Self::clear_stored_tokens();
+            Self::clear_stored_tokens();
         } else {
             // Check memory cache first
             {
@@ -471,7 +471,7 @@ impl AuthManager {
     }
 
     /// Clear all stored tokens from both OS Keyring and fallback session file
-    pub fn clear_stored_tokens() -> Result<(), String> {
+    pub fn clear_stored_tokens() {
         if let Ok(entry) = Entry::new(KEYRING_SERVICE, KEYRING_USER) {
             if let Ok(val) = entry.get_password() {
                 if let Some(count_str) = val.strip_prefix(KEYRING_CHUNKS_PREFIX) {
@@ -487,7 +487,6 @@ impl AuthManager {
         if fallback_path.exists() {
             let _ = fs::remove_file(fallback_path);
         }
-        Ok(())
     }
 
     /// Save token to OS Keyring, falling back to local file ONLY if explicitly opted in
@@ -636,6 +635,6 @@ mod tests {
         assert_eq!(loaded_store.expires_at, large_token_store.expires_at);
 
         // Cleanup
-        let _ = AuthManager::clear_stored_tokens();
+        AuthManager::clear_stored_tokens();
     }
 }
