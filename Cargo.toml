@@ -5,7 +5,7 @@ edition = "2021"
 authors = ["Teams TUI Team"]
 description = "Terminal User Interface for Microsoft Teams using Microsoft Graph API"
 license = "MIT"
-repository = "https://github.com/andre/teams-tui"
+repository = "https://github.com/craetive-australia/teams-tui"
 keywords = ["tui", "teams", "microsoft", "graph", "terminal"]
 categories = ["command-line-utilities"]
 

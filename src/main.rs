@@ -14,7 +14,9 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use graph::{ChannelSummary, ChatMessage, ChatSummary, GraphClient, OrgUser, PresenceInfo, TeamSummary};
+use graph::{
+    ChannelSummary, ChatMessage, ChatSummary, GraphClient, OrgUser, PresenceInfo, TeamSummary,
+};
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -175,7 +177,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     );
 
     if let Ok(profile) = profile_res {
-        println!("Signed in as: {}", profile.display_name.as_deref().unwrap_or("User"));
+        println!(
+            "Signed in as: {}",
+            profile.display_name.as_deref().unwrap_or("User")
+        );
         logger::log_info(format!("Signed in user: {:?}", profile.display_name));
         app.current_user = Some(profile);
     }
@@ -217,22 +222,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let t_id = team.id.clone();
         tokio::spawn(async move {
             let channels = g.get_team_channels(&t_id).await.unwrap_or_default();
-            let _ = tx.send(BackgroundEvent::TeamChannelsLoaded {
-                team_id: t_id,
-                channels,
-            }).await;
+            let _ = tx
+                .send(BackgroundEvent::TeamChannelsLoaded {
+                    team_id: t_id,
+                    channels,
+                })
+                .await;
         });
     }
 
     // If an initial conversation was selected, trigger initial background load
     if let Some(ref conv) = app.active_conversation {
         app.is_loading = true;
-        trigger_load_conversation(bg_tx.clone(), graph.clone(), conv.clone(), active_fetch_in_progress.clone());
+        trigger_load_conversation(
+            bg_tx.clone(),
+            graph.clone(),
+            conv.clone(),
+            active_fetch_in_progress.clone(),
+        );
     }
 
     // Trigger initial background presence load for visible 1:1 chats
     {
-        let initial_users = extract_user_ids(&app.raw_chats, app.current_user.as_ref().map(|u| u.id.as_str()));
+        let initial_users = extract_user_ids(
+            &app.raw_chats,
+            app.current_user.as_ref().map(|u| u.id.as_str()),
+        );
         trigger_load_presences(bg_tx.clone(), graph.clone(), initial_users);
     }
 
@@ -262,7 +277,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 }
 
                 if let Ok(presence) = graph_poller.get_presence().await {
-                    let _ = bg_tx_poller.send(BackgroundEvent::PresenceUpdated(presence)).await;
+                    let _ = bg_tx_poller
+                        .send(BackgroundEvent::PresenceUpdated(presence))
+                        .await;
                 }
             }
         });
@@ -284,13 +301,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     loop {
         // 1. Process pending background events
         while let Ok(event) = bg_rx.try_recv() {
-            handle_background_event(
-                &mut app,
-                event,
-                &bg_tx,
-                &graph,
-                &active_fetch_in_progress,
-            );
+            handle_background_event(&mut app, event, &bg_tx, &graph, &active_fetch_in_progress);
         }
 
         // 2. Render frame
@@ -302,7 +313,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 if timer.elapsed() >= Duration::from_millis(300) {
                     search_debounce_timer = None;
                     let q = app.search.query.trim().to_string();
-                    if !q.is_empty() && q != last_search_query && !app.search.directory_search_denied {
+                    if !q.is_empty()
+                        && q != last_search_query
+                        && !app.search.directory_search_denied
+                    {
                         last_search_query.clone_from(&q);
                         app.search.is_searching = true;
                         let tx = bg_tx.clone();
@@ -311,16 +325,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                             let t0 = Instant::now();
                             match g.search_users(&q).await {
                                 Ok(results) => {
-                                    let _ = tx.send(BackgroundEvent::SearchResults {
-                                        query: q,
-                                        results,
-                                        elapsed_ms: t0.elapsed().as_millis(),
-                                    }).await;
+                                    let _ = tx
+                                        .send(BackgroundEvent::SearchResults {
+                                            query: q,
+                                            results,
+                                            elapsed_ms: t0.elapsed().as_millis(),
+                                        })
+                                        .await;
                                 }
                                 Err(e) => {
-                                    let _ = tx.send(BackgroundEvent::SearchFailed {
-                                        error: e.to_string(),
-                                    }).await;
+                                    let _ = tx
+                                        .send(BackgroundEvent::SearchFailed {
+                                            error: e.to_string(),
+                                        })
+                                        .await;
                                 }
                             }
                         });
@@ -330,7 +348,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
 
         // 4. Background polling for active conversation
-        let is_channel = matches!(app.active_conversation, Some(ActiveConversation::Channel { .. }));
+        let is_channel = matches!(
+            app.active_conversation,
+            Some(ActiveConversation::Channel { .. })
+        );
         let poll_interval = if is_channel {
             active_poll_interval_channel
         } else {
@@ -348,13 +369,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     tokio::spawn(async move {
                         let res = match &conv {
                             ActiveConversation::Chat { id, .. } => g.get_chat_messages(id).await,
-                            ActiveConversation::Channel { team_id, channel_id, .. } => {
-                                g.get_channel_messages(team_id, channel_id).await
-                            }
+                            ActiveConversation::Channel {
+                                team_id,
+                                channel_id,
+                                ..
+                            } => g.get_channel_messages(team_id, channel_id).await,
                         };
                         progress_guard.store(false, Ordering::Relaxed);
                         if let Ok(msgs) = res {
-                            let _ = tx.send(BackgroundEvent::ConversationPolled { conv, messages: msgs }).await;
+                            let _ = tx
+                                .send(BackgroundEvent::ConversationPolled {
+                                    conv,
+                                    messages: msgs,
+                                })
+                                .await;
                         }
                     });
                 }
@@ -363,7 +391,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
         if last_presence_poll.elapsed() >= presence_poll_interval {
             last_presence_poll = Instant::now();
-            let user_ids = extract_user_ids(&app.raw_chats, app.current_user.as_ref().map(|u| u.id.as_str()));
+            let user_ids = extract_user_ids(
+                &app.raw_chats,
+                app.current_user.as_ref().map(|u| u.id.as_str()),
+            );
             trigger_load_presences(bg_tx.clone(), graph.clone(), user_ids);
         }
 
@@ -398,13 +429,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     continue;
                 }
 
-                handle_pane_key(
-                    &mut app,
-                    key,
-                    &bg_tx,
-                    &graph,
-                    &active_fetch_in_progress,
-                );
+                handle_pane_key(&mut app, key, &bg_tx, &graph, &active_fetch_in_progress);
             }
         }
 
@@ -428,10 +453,17 @@ fn handle_background_event(
 ) {
     match event {
         BackgroundEvent::TeamChannelsLoaded { team_id, channels } => {
-            logger::log_info(format!("Loaded {} channels for team {team_id}", channels.len()));
+            logger::log_info(format!(
+                "Loaded {} channels for team {team_id}",
+                channels.len()
+            ));
             app.update_team_channels(&team_id, channels);
         }
-        BackgroundEvent::MessagesLoaded { conv, messages, elapsed_ms } => {
+        BackgroundEvent::MessagesLoaded {
+            conv,
+            messages,
+            elapsed_ms,
+        } => {
             app.cache_messages(&conv, messages.clone());
             if app.active_conversation.as_ref() == Some(&conv) {
                 logger::log_info(format!(
@@ -454,15 +486,26 @@ fn handle_background_event(
             }
         }
         BackgroundEvent::MessageSent { conv, elapsed_ms } => {
-            logger::log_info(format!("Message sent in {elapsed_ms}ms. Reloading conversation..."));
+            logger::log_info(format!(
+                "Message sent in {elapsed_ms}ms. Reloading conversation..."
+            ));
             app.set_status(format!("Sent ({elapsed_ms}ms)"));
-            trigger_load_conversation(bg_tx.clone(), graph.clone(), conv, active_fetch_in_progress.clone());
+            trigger_load_conversation(
+                bg_tx.clone(),
+                graph.clone(),
+                conv,
+                active_fetch_in_progress.clone(),
+            );
         }
         BackgroundEvent::MessageSendFailed { error } => {
             logger::log_error(format!("Message send failed: {error}"));
             app.set_status(format!("Send failed: {error}"));
         }
-        BackgroundEvent::SearchResults { query, results, elapsed_ms } => {
+        BackgroundEvent::SearchResults {
+            query,
+            results,
+            elapsed_ms,
+        } => {
             if app.search.is_open && app.search.query == query {
                 logger::log_info(format!(
                     "Search for '{query}' returned {} remote results in {elapsed_ms}ms",
@@ -470,7 +513,10 @@ fn handle_background_event(
                 ));
                 let mut combined = app.search_local_contacts(&query);
                 for r in results {
-                    if !combined.iter().any(|c| c.id == r.id || (c.display_name.is_some() && c.display_name == r.display_name)) {
+                    if !combined.iter().any(|c| {
+                        c.id == r.id
+                            || (c.display_name.is_some() && c.display_name == r.display_name)
+                    }) {
                         combined.push(r);
                     }
                 }
@@ -496,9 +542,16 @@ fn handle_background_event(
             app.active_conversation = Some(new_conv.clone());
             app.close_search();
             app.focused_pane = FocusedPane::Input;
-            app.set_status(format!("Chatting with {target_name}. Type a message and press Enter!"));
+            app.set_status(format!(
+                "Chatting with {target_name}. Type a message and press Enter!"
+            ));
 
-            trigger_load_conversation(bg_tx.clone(), graph.clone(), new_conv, active_fetch_in_progress.clone());
+            trigger_load_conversation(
+                bg_tx.clone(),
+                graph.clone(),
+                new_conv,
+                active_fetch_in_progress.clone(),
+            );
             trigger_refresh_sidebar(bg_tx.clone(), graph.clone());
         }
         BackgroundEvent::ChatCreateFailed { error } => {
@@ -514,7 +567,11 @@ fn handle_background_event(
                 app.messages = messages;
             }
         }
-        BackgroundEvent::SidebarRefreshed { chats, teams, elapsed_ms } => {
+        BackgroundEvent::SidebarRefreshed {
+            chats,
+            teams,
+            elapsed_ms,
+        } => {
             logger::log_info(format!("Sidebar refreshed in {elapsed_ms}ms"));
             app.rebuild_sidebar(&chats, &teams);
             app.set_status("Refreshed!");
@@ -574,8 +631,15 @@ fn handle_search_modal_key(
         KeyCode::Enter => {
             if let Some(target_user) = app.selected_search_user().cloned() {
                 let target_id = target_user.id.clone();
-                let target_name = target_user.display_name.clone().unwrap_or_else(|| "User".to_string());
-                let my_id = app.current_user.as_ref().map(|u| u.id.clone()).unwrap_or_default();
+                let target_name = target_user
+                    .display_name
+                    .clone()
+                    .unwrap_or_else(|| "User".to_string());
+                let my_id = app
+                    .current_user
+                    .as_ref()
+                    .map(|u| u.id.clone())
+                    .unwrap_or_default();
 
                 if let Some(existing_chat) = app.find_existing_chat(&target_name, &target_id) {
                     let new_conv = ActiveConversation::Chat {
@@ -585,7 +649,9 @@ fn handle_search_modal_key(
                     app.active_conversation = Some(new_conv.clone());
                     app.close_search();
                     app.focused_pane = FocusedPane::Input;
-                    app.set_status(format!("Opened chat with {target_name}. Press 'i' or Enter to type!"));
+                    app.set_status(format!(
+                        "Opened chat with {target_name}. Press 'i' or Enter to type!"
+                    ));
 
                     if let Some(cached) = app.get_cached_messages(&new_conv) {
                         app.messages = cached.clone();
@@ -597,7 +663,12 @@ fn handle_search_modal_key(
                         app.is_syncing = false;
                     }
 
-                    trigger_load_conversation(bg_tx.clone(), graph.clone(), new_conv, active_fetch_in_progress.clone());
+                    trigger_load_conversation(
+                        bg_tx.clone(),
+                        graph.clone(),
+                        new_conv,
+                        active_fetch_in_progress.clone(),
+                    );
                 } else if !my_id.is_empty() && !target_id.is_empty() {
                     app.set_status(format!("Opening 1:1 chat with {target_name}..."));
                     let g = graph.clone();
@@ -607,15 +678,19 @@ fn handle_search_modal_key(
                     tokio::spawn(async move {
                         match g.get_or_create_1on1_chat(&my_id, &target_id).await {
                             Ok(chat) => {
-                                let _ = tx.send(BackgroundEvent::ChatCreated {
-                                    chat,
-                                    target_name: t_name,
-                                }).await;
+                                let _ = tx
+                                    .send(BackgroundEvent::ChatCreated {
+                                        chat,
+                                        target_name: t_name,
+                                    })
+                                    .await;
                             }
                             Err(e) => {
-                                let _ = tx.send(BackgroundEvent::ChatCreateFailed {
-                                    error: e.to_string(),
-                                }).await;
+                                let _ = tx
+                                    .send(BackgroundEvent::ChatCreateFailed {
+                                        error: e.to_string(),
+                                    })
+                                    .await;
                             }
                         }
                     });
@@ -644,7 +719,11 @@ fn handle_status_modal_key(
         }
         KeyCode::Enter => {
             let (_, _, availability, activity) = app::STATUS_OPTIONS[app.status_modal.selected_idx];
-            let my_id = app.current_user.as_ref().map(|u| u.id.clone()).unwrap_or_default();
+            let my_id = app
+                .current_user
+                .as_ref()
+                .map(|u| u.id.clone())
+                .unwrap_or_default();
             if !my_id.is_empty() {
                 let g = graph.clone();
                 let tx = bg_tx.clone();
@@ -669,7 +748,9 @@ fn handle_status_modal_key(
                         }
                         Err(e) => {
                             logger::log_error(format!("Failed to set preferred presence: {e}"));
-                            let _ = tx.send(BackgroundEvent::PresenceSetResult(Err(e.to_string()))).await;
+                            let _ = tx
+                                .send(BackgroundEvent::PresenceSetResult(Err(e.to_string())))
+                                .await;
                         }
                     }
                 });
@@ -707,17 +788,28 @@ fn handle_pane_key(
                                 ActiveConversation::Chat { id, .. } => {
                                     g.send_chat_message(id, &content).await
                                 }
-                                ActiveConversation::Channel { team_id, channel_id, .. } => {
-                                    g.send_channel_message(team_id, channel_id, &content).await
-                                }
+                                ActiveConversation::Channel {
+                                    team_id,
+                                    channel_id,
+                                    ..
+                                } => g.send_channel_message(team_id, channel_id, &content).await,
                             };
                             let elapsed_ms = t0.elapsed().as_millis();
                             match res {
                                 Ok(()) => {
-                                    let _ = tx.send(BackgroundEvent::MessageSent { conv: c, elapsed_ms }).await;
+                                    let _ = tx
+                                        .send(BackgroundEvent::MessageSent {
+                                            conv: c,
+                                            elapsed_ms,
+                                        })
+                                        .await;
                                 }
                                 Err(e) => {
-                                    let _ = tx.send(BackgroundEvent::MessageSendFailed { error: e.to_string() }).await;
+                                    let _ = tx
+                                        .send(BackgroundEvent::MessageSendFailed {
+                                            error: e.to_string(),
+                                        })
+                                        .await;
                                 }
                             }
                         });
@@ -768,9 +860,8 @@ fn handle_pane_key(
             KeyCode::Enter => {
                 if let Some(conv) = app.currently_selected_conversation() {
                     let title = match &conv {
-                        ActiveConversation::Chat { title, .. } | ActiveConversation::Channel { title, .. } => {
-                            title.clone()
-                        }
+                        ActiveConversation::Chat { title, .. }
+                        | ActiveConversation::Channel { title, .. } => title.clone(),
                     };
                     app.active_conversation = Some(conv.clone());
 
@@ -786,7 +877,12 @@ fn handle_pane_key(
                         app.set_status(format!("Loading {title}..."));
                     }
 
-                    trigger_load_conversation(bg_tx.clone(), graph.clone(), conv, active_fetch_in_progress.clone());
+                    trigger_load_conversation(
+                        bg_tx.clone(),
+                        graph.clone(),
+                        conv,
+                        active_fetch_in_progress.clone(),
+                    );
                 }
             }
             KeyCode::Char('r') => {
@@ -821,34 +917,41 @@ fn trigger_load_conversation(
         let t0 = Instant::now();
         let res = match &conv {
             ActiveConversation::Chat { id, .. } => graph.get_chat_messages(id).await,
-            ActiveConversation::Channel { team_id, channel_id, .. } => {
-                graph.get_channel_messages(team_id, channel_id).await
-            }
+            ActiveConversation::Channel {
+                team_id,
+                channel_id,
+                ..
+            } => graph.get_channel_messages(team_id, channel_id).await,
         };
         guard.store(false, Ordering::Relaxed);
         let elapsed_ms = t0.elapsed().as_millis();
         match res {
             Ok(msgs) => {
-                let _ = tx.send(BackgroundEvent::MessagesLoaded { conv, messages: msgs, elapsed_ms }).await;
+                let _ = tx
+                    .send(BackgroundEvent::MessagesLoaded {
+                        conv,
+                        messages: msgs,
+                        elapsed_ms,
+                    })
+                    .await;
             }
             Err(e) => {
-                let _ = tx.send(BackgroundEvent::MessageLoadFailed { conv, error: e.to_string() }).await;
+                let _ = tx
+                    .send(BackgroundEvent::MessageLoadFailed {
+                        conv,
+                        error: e.to_string(),
+                    })
+                    .await;
             }
         }
     });
 }
 
 /// Helper: Trigger non-blocking background sidebar refresh using `JoinSet` (no external futures crate)
-fn trigger_refresh_sidebar(
-    tx: mpsc::Sender<BackgroundEvent>,
-    graph: Arc<GraphClient>,
-) {
+fn trigger_refresh_sidebar(tx: mpsc::Sender<BackgroundEvent>, graph: Arc<GraphClient>) {
     tokio::spawn(async move {
         let t0 = Instant::now();
-        let (chats_res, teams_res) = tokio::join!(
-            graph.get_my_chats(),
-            graph.get_joined_teams()
-        );
+        let (chats_res, teams_res) = tokio::join!(graph.get_my_chats(), graph.get_joined_teams());
         let chats = chats_res.unwrap_or_default();
         let teams = teams_res.unwrap_or_default();
 
@@ -870,11 +973,13 @@ fn trigger_refresh_sidebar(
 
         let elapsed_ms = t0.elapsed().as_millis();
 
-        let _ = tx.send(BackgroundEvent::SidebarRefreshed {
-            chats,
-            teams: teams_with_channels,
-            elapsed_ms,
-        }).await;
+        let _ = tx
+            .send(BackgroundEvent::SidebarRefreshed {
+                chats,
+                teams: teams_with_channels,
+                elapsed_ms,
+            })
+            .await;
     });
 }
 
@@ -890,7 +995,9 @@ fn trigger_load_presences(
     tokio::spawn(async move {
         let refs: Vec<&str> = user_ids.iter().map(std::string::String::as_str).collect();
         if let Ok(presences) = graph.get_users_presence(&refs).await {
-            let _ = tx.send(BackgroundEvent::UserPresencesLoaded(presences)).await;
+            let _ = tx
+                .send(BackgroundEvent::UserPresencesLoaded(presences))
+                .await;
         }
     });
 }
