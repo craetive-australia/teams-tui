@@ -322,7 +322,11 @@ pub fn strip_html_tags(html: &str) -> String {
 /// Validate path segment IDs to prevent path traversal or malformed URL structures
 fn sanitize_id(id: &str) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let trimmed = id.trim();
-    if trimmed.is_empty() || trimmed.contains('/') || trimmed.contains('\\') || trimmed.contains('?') {
+    if trimmed.is_empty()
+        || trimmed.contains('/')
+        || trimmed.contains('\\')
+        || trimmed.contains('?')
+    {
         return Err(format!("Invalid identifier in request: '{trimmed}'").into());
     }
     Ok(trimmed.to_string())
@@ -367,7 +371,10 @@ impl GraphClient {
     }
 
     /// Execute request with automatic 429 backoff and 401 token refresh retry
-    async fn execute_with_retry(&self, make_request: impl Fn(&Client, &str) -> RequestBuilder) -> Result<Response, Box<dyn std::error::Error + Send + Sync>> {
+    async fn execute_with_retry(
+        &self,
+        make_request: impl Fn(&Client, &str) -> RequestBuilder,
+    ) -> Result<Response, Box<dyn std::error::Error + Send + Sync>> {
         let mut attempts = 0;
         let mut refreshed_token = false;
 
@@ -381,7 +388,9 @@ impl GraphClient {
 
             if status == StatusCode::UNAUTHORIZED && !refreshed_token {
                 if let Some(ref auth) = self.auth_manager {
-                    crate::logger::log_warn("Graph API returned 401 Unauthorized. Attempting token refresh...");
+                    crate::logger::log_warn(
+                        "Graph API returned 401 Unauthorized. Attempting token refresh...",
+                    );
                     if let Ok(new_tok) = auth.refresh_current_token().await {
                         let mut lock = self.token.write().await;
                         *lock = new_tok;
@@ -416,11 +425,17 @@ impl GraphClient {
         }
     }
 
-    async fn send_and_parse<T: for<'de> Deserialize<'de>>(&self, make_request: impl Fn(&Client, &str) -> RequestBuilder) -> Result<T, Box<dyn std::error::Error + Send + Sync>> {
+    async fn send_and_parse<T: for<'de> Deserialize<'de>>(
+        &self,
+        make_request: impl Fn(&Client, &str) -> RequestBuilder,
+    ) -> Result<T, Box<dyn std::error::Error + Send + Sync>> {
         let resp = self.execute_with_retry(make_request).await?;
         let status = resp.status();
         if !status.is_success() {
-            let err_txt = resp.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            let err_txt = resp
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
             return Err(format!("Graph API error HTTP {status}: {err_txt}").into());
         }
         let data = resp.json::<T>().await?;
@@ -430,17 +445,17 @@ impl GraphClient {
     /// Fetch signed-in user's profile
     pub async fn get_me(&self) -> Result<UserProfile, Box<dyn std::error::Error + Send + Sync>> {
         let url = format!("{}/me", self.base_url);
-        self.send_and_parse(|client, auth| {
-            client.get(&url).header("Authorization", auth)
-        }).await
+        self.send_and_parse(|client, auth| client.get(&url).header("Authorization", auth))
+            .await
     }
 
     /// Fetch user's Teams presence (e.g. Available, Busy, Away)
-    pub async fn get_presence(&self) -> Result<PresenceInfo, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn get_presence(
+        &self,
+    ) -> Result<PresenceInfo, Box<dyn std::error::Error + Send + Sync>> {
         let url = format!("{}/me/presence", self.base_url);
-        self.send_and_parse(|client, auth| {
-            client.get(&url).header("Authorization", auth)
-        }).await
+        self.send_and_parse(|client, auth| client.get(&url).header("Authorization", auth))
+            .await
     }
 
     /// Set user's preferred presence
@@ -451,16 +466,21 @@ impl GraphClient {
         activity: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let valid_uid = sanitize_id(user_id)?;
-        let url = format!("{}/users/{valid_uid}/presence/setUserPreferredPresence", self.base_url);
+        let url = format!(
+            "{}/users/{valid_uid}/presence/setUserPreferredPresence",
+            self.base_url
+        );
         let body = serde_json::json!({
             "availability": availability,
             "activity": activity,
             "expirationDuration": "PT8H"
         });
 
-        let resp = self.execute_with_retry(|client, auth| {
-            client.post(&url).header("Authorization", auth).json(&body)
-        }).await?;
+        let resp = self
+            .execute_with_retry(|client, auth| {
+                client.post(&url).header("Authorization", auth).json(&body)
+            })
+            .await?;
 
         if !resp.status().is_success() {
             let err_txt = resp.text().await?;
@@ -470,7 +490,10 @@ impl GraphClient {
     }
 
     /// Establish an application-level presence session so the user doesn't appear Offline
-    pub async fn establish_presence_session(&self, client_id: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn establish_presence_session(
+        &self,
+        client_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let url = format!("{}/me/presence/setPresence", self.base_url);
         let body = serde_json::json!({
             "sessionId": client_id,
@@ -479,9 +502,11 @@ impl GraphClient {
             "expirationDuration": "PT1H"
         });
 
-        let resp = self.execute_with_retry(|client, auth| {
-            client.post(&url).header("Authorization", auth).json(&body)
-        }).await?;
+        let resp = self
+            .execute_with_retry(|client, auth| {
+                client.post(&url).header("Authorization", auth).json(&body)
+            })
+            .await?;
 
         if !resp.status().is_success() {
             let err_txt = resp.text().await?;
@@ -496,11 +521,14 @@ impl GraphClient {
         user_id: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let valid_uid = sanitize_id(user_id)?;
-        let url = format!("{}/users/{valid_uid}/presence/clearUserPreferredPresence", self.base_url);
+        let url = format!(
+            "{}/users/{valid_uid}/presence/clearUserPreferredPresence",
+            self.base_url
+        );
 
-        let resp = self.execute_with_retry(|client, auth| {
-            client.post(&url).header("Authorization", auth)
-        }).await?;
+        let resp = self
+            .execute_with_retry(|client, auth| client.post(&url).header("Authorization", auth))
+            .await?;
 
         if !resp.status().is_success() {
             let err_txt = resp.text().await?;
@@ -523,38 +551,48 @@ impl GraphClient {
             "ids": user_ids
         });
 
-        let data: GraphList<PresenceResult> = self.send_and_parse(|client, auth| {
-            client.post(&url).header("Authorization", auth).json(&body)
-        }).await?;
+        let data: GraphList<PresenceResult> = self
+            .send_and_parse(|client, auth| {
+                client.post(&url).header("Authorization", auth).json(&body)
+            })
+            .await?;
 
-        let result = data.value.into_iter().map(|p| {
-            (
-                p.id,
-                PresenceInfo {
-                    availability: p.availability,
-                    activity: p.activity,
-                }
-            )
-        }).collect();
+        let result = data
+            .value
+            .into_iter()
+            .map(|p| {
+                (
+                    p.id,
+                    PresenceInfo {
+                        availability: p.availability,
+                        activity: p.activity,
+                    },
+                )
+            })
+            .collect();
 
         Ok(result)
     }
 
     /// List 1:1 and Group chats
-    pub async fn get_my_chats(&self) -> Result<Vec<ChatSummary>, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn get_my_chats(
+        &self,
+    ) -> Result<Vec<ChatSummary>, Box<dyn std::error::Error + Send + Sync>> {
         let url = format!("{}/me/chats?$expand=members&$top=30", self.base_url);
-        let data: GraphList<ChatSummary> = self.send_and_parse(|client, auth| {
-            client.get(&url).header("Authorization", auth)
-        }).await?;
+        let data: GraphList<ChatSummary> = self
+            .send_and_parse(|client, auth| client.get(&url).header("Authorization", auth))
+            .await?;
         Ok(data.value)
     }
 
     /// List Teams user has joined
-    pub async fn get_joined_teams(&self) -> Result<Vec<TeamSummary>, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn get_joined_teams(
+        &self,
+    ) -> Result<Vec<TeamSummary>, Box<dyn std::error::Error + Send + Sync>> {
         let url = format!("{}/me/joinedTeams", self.base_url);
-        let data: GraphList<TeamSummary> = self.send_and_parse(|client, auth| {
-            client.get(&url).header("Authorization", auth)
-        }).await?;
+        let data: GraphList<TeamSummary> = self
+            .send_and_parse(|client, auth| client.get(&url).header("Authorization", auth))
+            .await?;
         Ok(data.value)
     }
 
@@ -565,9 +603,9 @@ impl GraphClient {
     ) -> Result<Vec<ChannelSummary>, Box<dyn std::error::Error + Send + Sync>> {
         let valid_tid = sanitize_id(team_id)?;
         let url = format!("{}/teams/{valid_tid}/channels", self.base_url);
-        let data: GraphList<ChannelSummary> = self.send_and_parse(|client, auth| {
-            client.get(&url).header("Authorization", auth)
-        }).await?;
+        let data: GraphList<ChannelSummary> = self
+            .send_and_parse(|client, auth| client.get(&url).header("Authorization", auth))
+            .await?;
         Ok(data.value)
     }
 
@@ -578,9 +616,9 @@ impl GraphClient {
     ) -> Result<Vec<ChatMessage>, Box<dyn std::error::Error + Send + Sync>> {
         let valid_cid = sanitize_id(chat_id)?;
         let url = format!("{}/me/chats/{valid_cid}/messages?$top=30", self.base_url);
-        let data: GraphList<ChatMessage> = self.send_and_parse(|client, auth| {
-            client.get(&url).header("Authorization", auth)
-        }).await?;
+        let data: GraphList<ChatMessage> = self
+            .send_and_parse(|client, auth| client.get(&url).header("Authorization", auth))
+            .await?;
         Ok(data.value)
     }
 
@@ -592,10 +630,13 @@ impl GraphClient {
     ) -> Result<Vec<ChatMessage>, Box<dyn std::error::Error + Send + Sync>> {
         let team_id_clean = sanitize_id(team_id)?;
         let channel_id_clean = sanitize_id(channel_id)?;
-        let url = format!("{}/teams/{team_id_clean}/channels/{channel_id_clean}/messages?$top=20", self.base_url);
-        let data: GraphList<ChatMessage> = self.send_and_parse(|client, auth| {
-            client.get(&url).header("Authorization", auth)
-        }).await?;
+        let url = format!(
+            "{}/teams/{team_id_clean}/channels/{channel_id_clean}/messages?$top=20",
+            self.base_url
+        );
+        let data: GraphList<ChatMessage> = self
+            .send_and_parse(|client, auth| client.get(&url).header("Authorization", auth))
+            .await?;
         Ok(data.value)
     }
 
@@ -614,9 +655,11 @@ impl GraphClient {
             }
         });
 
-        let resp = self.execute_with_retry(|client, auth| {
-            client.post(&url).header("Authorization", auth).json(&body)
-        }).await?;
+        let resp = self
+            .execute_with_retry(|client, auth| {
+                client.post(&url).header("Authorization", auth).json(&body)
+            })
+            .await?;
 
         if !resp.status().is_success() {
             let err_txt = resp.text().await?;
@@ -634,7 +677,10 @@ impl GraphClient {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let team_id_clean = sanitize_id(team_id)?;
         let channel_id_clean = sanitize_id(channel_id)?;
-        let url = format!("{}/teams/{team_id_clean}/channels/{channel_id_clean}/messages", self.base_url);
+        let url = format!(
+            "{}/teams/{team_id_clean}/channels/{channel_id_clean}/messages",
+            self.base_url
+        );
         let body = serde_json::json!({
             "body": {
                 "contentType": "text",
@@ -642,9 +688,11 @@ impl GraphClient {
             }
         });
 
-        let resp = self.execute_with_retry(|client, auth| {
-            client.post(&url).header("Authorization", auth).json(&body)
-        }).await?;
+        let resp = self
+            .execute_with_retry(|client, auth| {
+                client.post(&url).header("Authorization", auth).json(&body)
+            })
+            .await?;
 
         if !resp.status().is_success() {
             let err_txt = resp.text().await?;
@@ -668,32 +716,36 @@ impl GraphClient {
             "startswith(displayName,'{clean_q}') or startswith(userPrincipalName,'{clean_q}') or startswith(mail,'{clean_q}')"
         );
 
-        let resp = self.execute_with_retry(|client, auth| {
-            client.get(&url)
-                .header("Authorization", auth)
-                .query(&[
+        let resp = self
+            .execute_with_retry(|client, auth| {
+                client.get(&url).header("Authorization", auth).query(&[
                     ("$filter", filter.as_str()),
                     ("$top", "15"),
-                    ("$select", "id,displayName,userPrincipalName,mail,jobTitle,department"),
+                    (
+                        "$select",
+                        "id,displayName,userPrincipalName,mail,jobTitle,department",
+                    ),
                 ])
-        }).await?;
+            })
+            .await?;
 
         if resp.status() == StatusCode::FORBIDDEN {
             crate::logger::log_warn(
-                "/users returned 403 Forbidden. Falling back to /me/people endpoint..."
+                "/users returned 403 Forbidden. Falling back to /me/people endpoint...",
             );
             let people_url = format!("{}/me/people", self.base_url);
             let escaped_search = clean_q.replace('\\', "\\\\").replace('"', "\\\"");
             let search_val = format!("\"{escaped_search}\"");
 
-            if let Ok(people_resp) = self.execute_with_retry(|client, auth| {
-                client.get(&people_url)
-                    .header("Authorization", auth)
-                    .query(&[
-                        ("$search", search_val.as_str()),
-                        ("$top", "15"),
-                    ])
-            }).await {
+            if let Ok(people_resp) = self
+                .execute_with_retry(|client, auth| {
+                    client
+                        .get(&people_url)
+                        .header("Authorization", auth)
+                        .query(&[("$search", search_val.as_str()), ("$top", "15")])
+                })
+                .await
+            {
                 if people_resp.status().is_success() {
                     if let Ok(people_data) = people_resp.json::<GraphList<GraphPerson>>().await {
                         let users = people_data
@@ -757,9 +809,11 @@ impl GraphClient {
             ]
         });
 
-        let resp = self.execute_with_retry(|client, auth| {
-            client.post(&url).header("Authorization", auth).json(&body)
-        }).await?;
+        let resp = self
+            .execute_with_retry(|client, auth| {
+                client.post(&url).header("Authorization", auth).json(&body)
+            })
+            .await?;
 
         if !resp.status().is_success() {
             let err_txt = resp.text().await?;

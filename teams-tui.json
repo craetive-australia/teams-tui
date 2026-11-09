@@ -10,7 +10,12 @@
     }
   },
   "extract_dir": "",
-  "bin": "teams-tui.exe",
+  "bin": [
+    [
+      "teams-tui-windows-amd64.exe",
+      "teams-tui"
+    ]
+  ],
   "checkver": "github",
   "autoupdate": {
     "architecture": {

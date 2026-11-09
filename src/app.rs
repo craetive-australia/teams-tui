@@ -1,4 +1,6 @@
-use crate::graph::{ChannelSummary, ChatMessage, ChatSummary, OrgUser, PresenceInfo, TeamSummary, UserProfile};
+use crate::graph::{
+    ChannelSummary, ChatMessage, ChatSummary, OrgUser, PresenceInfo, TeamSummary, UserProfile,
+};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -45,7 +47,11 @@ impl ActiveConversation {
     pub fn cache_key(&self) -> String {
         match self {
             ActiveConversation::Chat { id, .. } => format!("chat:{id}"),
-            ActiveConversation::Channel { team_id, channel_id, .. } => {
+            ActiveConversation::Channel {
+                team_id,
+                channel_id,
+                ..
+            } => {
                 format!("channel:{team_id}:{channel_id}")
             }
         }
@@ -174,7 +180,8 @@ impl App {
     }
 
     pub fn status_down(&mut self) {
-        self.status_modal.selected_idx = (self.status_modal.selected_idx + 1) % STATUS_OPTIONS.len();
+        self.status_modal.selected_idx =
+            (self.status_modal.selected_idx + 1) % STATUS_OPTIONS.len();
     }
 
     pub fn search_char(&mut self, c: char) {
@@ -362,7 +369,11 @@ impl App {
                             && seen.insert(name.to_lowercase())
                         {
                             results.push(OrgUser {
-                                id: member.user_id.clone().or_else(|| member.id.clone()).unwrap_or_default(),
+                                id: member
+                                    .user_id
+                                    .clone()
+                                    .or_else(|| member.id.clone())
+                                    .unwrap_or_default(),
                                 display_name: Some(name.clone()),
                                 user_principal_name: member.email.clone(),
                                 mail: member.email.clone(),

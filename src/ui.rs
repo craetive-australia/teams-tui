@@ -60,10 +60,26 @@ fn render_header(frame: &mut Frame, app: &App, area: Rect) {
     };
 
     let title_spans = vec![
-        Span::styled("Teams TUI ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-        Span::styled(format!("| User: {user_name} "), Style::default().fg(Color::White)),
-        Span::styled(format!("| {presence_icon} "), Style::default().fg(presence_color)),
-        Span::styled(presence_text, Style::default().fg(presence_color).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "Teams TUI ",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!("| User: {user_name} "),
+            Style::default().fg(Color::White),
+        ),
+        Span::styled(
+            format!("| {presence_icon} "),
+            Style::default().fg(presence_color),
+        ),
+        Span::styled(
+            presence_text,
+            Style::default()
+                .fg(presence_color)
+                .add_modifier(Modifier::BOLD),
+        ),
     ];
 
     let block = Block::default()
@@ -79,7 +95,11 @@ fn render_header(frame: &mut Frame, app: &App, area: Rect) {
 
 fn render_sidebar(frame: &mut Frame, app: &App, area: Rect) {
     let is_focused = app.focused_pane == FocusedPane::Sidebar;
-    let border_color = if is_focused { Color::Yellow } else { Color::DarkGray };
+    let border_color = if is_focused {
+        Color::Yellow
+    } else {
+        Color::DarkGray
+    };
 
     let items: Vec<ListItem> = app
         .sidebar_items
@@ -170,7 +190,11 @@ fn render_sidebar(frame: &mut Frame, app: &App, area: Rect) {
         })
         .collect();
 
-    let list_title = if is_focused { " [Chats & Teams (Active)] " } else { " Chats & Teams " };
+    let list_title = if is_focused {
+        " [Chats & Teams (Active)] "
+    } else {
+        " Chats & Teams "
+    };
 
     let list = List::new(items).block(
         Block::default()
@@ -184,7 +208,11 @@ fn render_sidebar(frame: &mut Frame, app: &App, area: Rect) {
 
 fn render_messages(frame: &mut Frame, app: &App, area: Rect) {
     let is_focused = app.focused_pane == FocusedPane::Messages;
-    let border_color = if is_focused { Color::Yellow } else { Color::DarkGray };
+    let border_color = if is_focused {
+        Color::Yellow
+    } else {
+        Color::DarkGray
+    };
 
     let mut conv_title = match &app.active_conversation {
         Some(ActiveConversation::Chat { title, .. }) => format!(" Chat: {title} "),
@@ -209,7 +237,10 @@ fn render_messages(frame: &mut Frame, app: &App, area: Rect) {
 
     if app.messages.is_empty() {
         let msg = if app.is_loading {
-            if matches!(app.active_conversation, Some(ActiveConversation::Channel { .. })) {
+            if matches!(
+                app.active_conversation,
+                Some(ActiveConversation::Channel { .. })
+            ) {
                 "Loading channel messages from Microsoft Graph... (Channels may take a few moments)"
             } else {
                 "Loading messages..."
@@ -250,13 +281,20 @@ fn render_messages(frame: &mut Frame, app: &App, area: Rect) {
             .is_some_and(|name| name.eq_ignore_ascii_case(&sender));
 
         let sender_style = if is_me {
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD)
         };
 
         lines.push(Line::from(vec![
-            Span::styled(format!("[{timestamp}] "), Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                format!("[{timestamp}] "),
+                Style::default().fg(Color::DarkGray),
+            ),
             Span::styled(format!("{sender}:"), sender_style),
         ]));
 
@@ -280,7 +318,10 @@ fn render_messages(frame: &mut Frame, app: &App, area: Rect) {
                     "angry" => "😡",
                     _ => "✨",
                 };
-                reaction_spans.push(Span::styled(format!("{emoji} "), Style::default().fg(Color::Yellow)));
+                reaction_spans.push(Span::styled(
+                    format!("{emoji} "),
+                    Style::default().fg(Color::Yellow),
+                ));
             }
             lines.push(Line::from(reaction_spans));
         }
@@ -300,12 +341,16 @@ fn render_messages(frame: &mut Frame, app: &App, area: Rect) {
 
 fn render_input(frame: &mut Frame, app: &App, area: Rect) {
     let is_focused = app.focused_pane == FocusedPane::Input;
-    let border_color = if is_focused { Color::Yellow } else { Color::DarkGray };
+    let border_color = if is_focused {
+        Color::Yellow
+    } else {
+        Color::DarkGray
+    };
 
     let target_name = match &app.active_conversation {
-        Some(ActiveConversation::Chat { title, .. } | ActiveConversation::Channel { title, .. }) => {
-            title.as_str()
-        }
+        Some(
+            ActiveConversation::Chat { title, .. } | ActiveConversation::Channel { title, .. },
+        ) => title.as_str(),
         None => "None (Select a conversation first)",
     };
 
@@ -453,9 +498,13 @@ fn render_search_modal(frame: &mut Frame, app: &App) {
                 let dept = user.sanitized_department();
 
                 let name_style = if is_selected {
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD)
                 };
 
                 let subtext = if dept.is_empty() {
@@ -487,12 +536,10 @@ fn render_search_modal(frame: &mut Frame, app: &App) {
     }
 
     // Modal footer
-    let help_line = Line::from(vec![
-        Span::styled(
-            " [Enter] Start 1:1 Chat | [↑/↓] Select User | [Esc] Close Search ",
-            Style::default().fg(Color::Black).bg(Color::Yellow),
-        ),
-    ]);
+    let help_line = Line::from(vec![Span::styled(
+        " [Enter] Start 1:1 Chat | [↑/↓] Select User | [Esc] Close Search ",
+        Style::default().fg(Color::Black).bg(Color::Yellow),
+    )]);
     let footer_p = Paragraph::new(help_line).alignment(Alignment::Center);
     frame.render_widget(footer_p, chunks[2]);
 }
@@ -513,7 +560,9 @@ fn render_status_modal(frame: &mut Frame, app: &App) {
             let is_selected = idx == app.status_modal.selected_idx;
             let prefix = if is_selected { "▶ " } else { "  " };
             let style = if is_selected {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::White)
             };

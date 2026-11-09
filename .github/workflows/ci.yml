@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Format, Clippy & Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Validate GitHub Actions Workflows
+        run: |
+          ruby -ryaml -e '
+            Dir.glob(".github/workflows/*.yml").sort.each do |path|
+              data = YAML.load_file(path)
+              raise "Invalid workflow structure in #{path}" unless data.is_a?(Hash) && data["jobs"].is_a?(Hash)
+              puts "Validated #{path} (#{data["jobs"].size} jobs)"
+            end
+          '
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy lints
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Run unit tests
+        run: cargo test
