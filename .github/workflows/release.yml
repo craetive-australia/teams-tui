@@ -10,6 +10,11 @@ on:
         description: 'Release tag to publish (e.g. v0.1.6)'
         required: true
         type: string
+      rebuild:
+        description: 'Force rebuild and overwrite existing release assets'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -18,8 +23,58 @@ permissions:
   attestations: write
 
 jobs:
+  check-release:
+    name: Check Existing Release Assets
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.check.outputs.should_build }}
+    steps:
+      - name: Check if release assets already exist
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          REF_NAME="${{ github.event.inputs.tag || github.ref_name }}"
+          if [[ ! "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            echo "Invalid release tag: ${REF_NAME}"
+            exit 1
+          fi
+
+          if [ "${{ github.event_name }}" != "workflow_dispatch" ] || [ "${{ github.event.inputs.rebuild }}" = "true" ]; then
+            echo "Building release assets (event=${{ github.event_name }}, rebuild=${{ github.event.inputs.rebuild }})."
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          ASSETS=$(gh api "repos/${{ github.repository }}/releases/tags/${REF_NAME}" --jq '.assets[].name' 2>/dev/null || true)
+          REQUIRED=(
+            "teams-tui-linux-amd64.tar.gz"
+            "teams-tui-windows-amd64.exe.zip"
+            "teams-tui-macos-amd64.tar.gz"
+            "teams-tui-macos-arm64.tar.gz"
+          )
+
+          MISSING=0
+          for req in "${REQUIRED[@]}"; do
+            if ! grep -Fxq "$req" <<< "$ASSETS"; then
+              echo "Missing release asset on ${REF_NAME}: ${req}"
+              MISSING=1
+            fi
+          done
+
+          if [ "$MISSING" -eq 0 ]; then
+            echo "All 4 release archives already exist on ${REF_NAME}; skipping build-and-release to preserve asset SHA256 hashes."
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "One or more release archives are missing on ${REF_NAME}; running build-and-release."
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          fi
+
   build-and-release:
     name: Build and Release
+    needs: check-release
+    if: needs.check-release.outputs.should_build == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -123,7 +178,8 @@ jobs:
 
   publish-crates-io:
     name: Publish to crates.io
-    needs: build-and-release
+    needs: [check-release, build-and-release]
+    if: always() && needs.check-release.result == 'success' && (needs.build-and-release.result == 'success' || needs.build-and-release.result == 'skipped')
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
@@ -151,7 +207,8 @@ jobs:
 
   publish-homebrew:
     name: Publish to Homebrew Tap
-    needs: build-and-release
+    needs: [check-release, build-and-release]
+    if: always() && needs.check-release.result == 'success' && (needs.build-and-release.result == 'success' || needs.build-and-release.result == 'skipped')
     runs-on: ubuntu-latest
     continue-on-error: true
     env:
@@ -235,7 +292,8 @@ jobs:
 
   publish-scoop:
     name: Update Scoop Manifest
-    needs: build-and-release
+    needs: [check-release, build-and-release]
+    if: always() && needs.check-release.result == 'success' && (needs.build-and-release.result == 'success' || needs.build-and-release.result == 'skipped')
     runs-on: ubuntu-latest
     continue-on-error: true
     permissions:
@@ -296,7 +354,8 @@ jobs:
 
   publish-winget:
     name: Submit to WinGet
-    needs: build-and-release
+    needs: [check-release, build-and-release]
+    if: always() && needs.check-release.result == 'success' && (needs.build-and-release.result == 'success' || needs.build-and-release.result == 'skipped')
     runs-on: ubuntu-latest
     continue-on-error: true
     env:
@@ -330,6 +389,13 @@ jobs:
           MANIFEST_DIR="manifests/c/Craetive/teams-tui/${VERSION}"
           BRANCH_NAME="Craetive.teams-tui-${VERSION}"
 
+          # Check if upstream microsoft/winget-pkgs already has this exact version and SHA256 merged
+          UPSTREAM_INSTALLER=$(gh api "repos/microsoft/winget-pkgs/contents/${MANIFEST_DIR}/Craetive.teams-tui.installer.yaml" --jq .content 2>/dev/null | base64 -d 2>/dev/null || true)
+          if [ -n "$UPSTREAM_INSTALLER" ] && grep -Fq "InstallerSha256: ${WIN_SHA}" <<< "$UPSTREAM_INSTALLER"; then
+            echo "microsoft/winget-pkgs already has Craetive.teams-tui ${VERSION} with SHA256 ${WIN_SHA}; skipping."
+            exit 0
+          fi
+
           # 1. Sync fork with upstream microsoft/winget-pkgs
           echo "Syncing fork ${FORK_REPO} with upstream..."
           gh repo sync "$FORK_REPO" --source microsoft/winget-pkgs
@@ -350,6 +416,7 @@ jobs:
 
           # 4. Generate manifest contents
           VERSION_YAML=$(printf "%s\n" \
+            "# Created using teams-tui release workflow" \
             "# yaml-language-server: \$schema=https://aka.ms/winget-manifest.version.1.12.0.schema.json" \
             "" \
             "PackageIdentifier: Craetive.teams-tui" \
@@ -359,6 +426,7 @@ jobs:
             "ManifestVersion: 1.12.0")
 
           INSTALLER_YAML=$(printf "%s\n" \
+            "# Created using teams-tui release workflow" \
             "# yaml-language-server: \$schema=https://aka.ms/winget-manifest.installer.1.12.0.schema.json" \
             "" \
             "PackageIdentifier: Craetive.teams-tui" \
@@ -377,6 +445,7 @@ jobs:
             "ReleaseDate: ${RELEASE_DATE}")
 
           LOCALE_YAML=$(printf "%s\n" \
+            "# Created using teams-tui release workflow" \
             "# yaml-language-server: \$schema=https://aka.ms/winget-manifest.defaultLocale.1.12.0.schema.json" \
             "" \
             "PackageIdentifier: Craetive.teams-tui" \
@@ -446,7 +515,7 @@ jobs:
 
           EXISTING_PR=$(gh pr list --repo microsoft/winget-pkgs --head "${FORK_OWNER}:${BRANCH_NAME}" --state open --json number --jq '.[0].number // empty')
           if [ -n "$EXISTING_PR" ]; then
-            echo "Pull request #${EXISTING_PR} is already open on microsoft/winget-pkgs."
+            echo "Updated branch ${FORK_OWNER}:${BRANCH_NAME} on existing pull request #${EXISTING_PR} in microsoft/winget-pkgs."
           else
             echo "Submitting pull request to microsoft/winget-pkgs..."
             gh pr create \
