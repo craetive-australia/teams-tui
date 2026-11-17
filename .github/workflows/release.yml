@@ -33,21 +33,23 @@ jobs:
         id: check
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          INPUT_REBUILD: ${{ github.event.inputs.rebuild }}
         run: |
           set -euo pipefail
-          REF_NAME="${{ github.event.inputs.tag || github.ref_name }}"
-          if [[ ! "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+          REF_NAME="${INPUT_TAG:-$GITHUB_REF_NAME}"
+          if [[ ! "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "Invalid release tag: ${REF_NAME}"
             exit 1
           fi
 
-          if [ "${{ github.event_name }}" != "workflow_dispatch" ] || [ "${{ github.event.inputs.rebuild }}" = "true" ]; then
-            echo "Building release assets (event=${{ github.event_name }}, rebuild=${{ github.event.inputs.rebuild }})."
+          if [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ] || [ "$INPUT_REBUILD" = "true" ]; then
+            echo "Building release assets (event=${GITHUB_EVENT_NAME}, rebuild=${INPUT_REBUILD})."
             echo "should_build=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          ASSETS=$(gh api "repos/${{ github.repository }}/releases/tags/${REF_NAME}" --jq '.assets[].name' 2>/dev/null || true)
+          ASSETS=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${REF_NAME}" --jq '.assets[].name' 2>/dev/null || true)
           REQUIRED=(
             "teams-tui-linux-amd64.tar.gz"
             "teams-tui-windows-amd64.exe.zip"
@@ -194,9 +196,14 @@ jobs:
       - name: Publish to crates.io
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
         run: |
           set -euo pipefail
-          REF_NAME="${{ github.event.inputs.tag || github.ref_name }}"
+          REF_NAME="${INPUT_TAG:-$GITHUB_REF_NAME}"
+          if [[ ! "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid release tag: ${REF_NAME}"
+            exit 1
+          fi
           VERSION="${REF_NAME#v}"
           STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" -A "teams-tui-ci" "https://crates.io/api/v1/crates/teams-tui/${VERSION}")
           if [ "$STATUS_CODE" = "200" ]; then
@@ -214,6 +221,7 @@ jobs:
     env:
       TAP_REPO: "craetive-australia/homebrew-teams-tui"
       GITHUB_TOKEN: ${{ secrets.PAT }}
+      INPUT_TAG: ${{ github.event.inputs.tag }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -221,8 +229,8 @@ jobs:
       - name: Update Homebrew Formula
         run: |
           set -euo pipefail
-          REF_NAME="${{ github.event.inputs.tag || github.ref_name }}"
-          if [[ ! "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+          REF_NAME="${INPUT_TAG:-$GITHUB_REF_NAME}"
+          if [[ ! "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "Invalid release tag: ${REF_NAME}"
             exit 1
           fi
@@ -301,6 +309,7 @@ jobs:
       pull-requests: write
     env:
       GITHUB_TOKEN: ${{ secrets.PAT || secrets.GITHUB_TOKEN }}
+      INPUT_TAG: ${{ github.event.inputs.tag }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -310,8 +319,8 @@ jobs:
       - name: Update Scoop Manifest
         run: |
           set -euo pipefail
-          REF_NAME="${{ github.event.inputs.tag || github.ref_name }}"
-          if [[ ! "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+          REF_NAME="${INPUT_TAG:-$GITHUB_REF_NAME}"
+          if [[ ! "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "Invalid release tag: ${REF_NAME}"
             exit 1
           fi
@@ -362,12 +371,13 @@ jobs:
       GH_TOKEN: ${{ secrets.PAT }}
       FORK_OWNER: "craetive-australia"
       FORK_REPO: "craetive-australia/winget-pkgs"
+      INPUT_TAG: ${{ github.event.inputs.tag }}
     steps:
       - name: Submit WinGet Manifest Update
         run: |
           set -euo pipefail
-          REF_NAME="${{ github.event.inputs.tag || github.ref_name }}"
-          if [[ ! "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+          REF_NAME="${INPUT_TAG:-$GITHUB_REF_NAME}"
+          if [[ ! "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "Invalid release tag: ${REF_NAME}"
             exit 1
           fi
