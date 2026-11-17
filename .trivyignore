@@ -1,0 +1,3 @@
+# Trivy Ignore Configuration
+# Document accepted risks or false-positive CVE/misconfiguration IDs below.
+# Format: <CVE-ID or AVD-ID> [exp:YYYY-MM-DD] # Justification

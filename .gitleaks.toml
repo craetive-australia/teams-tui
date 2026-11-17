@@ -1,0 +1,19 @@
+title = "Gitleaks Configuration"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Ignore build artifacts, lockfiles, and vendor directories"
+paths = [
+  '''(^|/)node_modules/''',
+  '''(^|/)dist/''',
+  '''(^|/)target/''',
+  '''(^|/)\.terraform/''',
+  '''(^|/)\.firebase/''',
+  '''(^|/)android/app/src/main/assets/''',
+  '''(^|/)ios/App/App/public/''',
+  '''(^|/)results/''',
+  '''package-lock\.json$''',
+  '''Cargo\.lock$'''
+]
