@@ -266,9 +266,9 @@ fn render_messages(frame: &mut Frame, app: &App, area: Rect) {
             .created_at
             .as_ref()
             .and_then(|t| {
-                chrono::DateTime::parse_from_rfc3339(t).ok().map(|dt| {
-                    dt.with_timezone(&chrono::Local)
-                        .format("%H:%M:%S")
+                t.parse::<jiff::Timestamp>().ok().map(|ts| {
+                    ts.to_zoned_datetime(jiff::tz::TimeZone::system())
+                        .strftime("%H:%M:%S")
                         .to_string()
                 })
             })
