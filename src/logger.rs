@@ -1,4 +1,4 @@
-use chrono::Local;
+use jiff::ZonedDateTime;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -55,7 +55,7 @@ pub fn log_error(msg: impl AsRef<str>) {
 fn write_entry(level: &str, msg: &str) {
     if let Ok(mut lock) = LOG_FILE.lock() {
         if let Some(ref mut file) = *lock {
-            let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+            let timestamp = ZonedDateTime::now().strftime("%Y-%m-%d %H:%M:%S%.3f");
             let _ = writeln!(file, "[{timestamp}] [{level}] {msg}");
         }
     }
